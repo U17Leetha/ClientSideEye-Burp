@@ -10,7 +10,7 @@ repositories {
 }
 
 dependencies {
-    // Required by BApp Store acceptance criteria: use the Montoya API artifact
+    // BApp-friendly: compile against public Montoya API (Burp provides it at runtime)
     compileOnly "net.portswigger.burp.extensions:montoya-api:2025.12"
 }
 
