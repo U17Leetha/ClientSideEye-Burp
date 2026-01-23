@@ -1,39 +1,91 @@
 package com.clientsideeye.burp.core;
 
 import java.time.Instant;
-import java.util.Map;
+import java.util.Objects;
 
-public class Finding {
-    public enum Type {
-        PASSWORD_VALUE_IN_DOM,
-        HIDDEN_OR_DISABLED_CONTROL,
-        ROLE_PERMISSION_HINT,
-        INLINE_SCRIPT_SECRETISH
+public final class Finding {
+
+    public enum Severity {
+        HIGH, MEDIUM, LOW, INFO
     }
 
-    public final String id;
-    public final Instant time;
-    public final Type type;
-    public final String url;
-    public final String host;
-    public final String title;
-    public final String severity;   // "High", "Information", etc.
-    public final String confidence; // "Firm", "Tentative"
-    public final String evidence;   // short, redacted
-    public final Map<String, Object> meta;
+    private final String type;          // FindingType name (string for stability)
+    private final Severity severity;    // HIGH/MEDIUM/LOW/INFO
+    private final int confidence;       // 0-100
 
-    public Finding(String id, Instant time, Type type, String url, String host,
-                   String title, String severity, String confidence,
-                   String evidence, Map<String, Object> meta) {
-        this.id = id;
-        this.time = time;
-        this.type = type;
-        this.url = url;
-        this.host = host;
-        this.title = title;
-        this.severity = severity;
-        this.confidence = confidence;
-        this.evidence = evidence;
-        this.meta = meta;
+    private final String url;
+    private final String host;
+    private final String title;
+    private final String summary;
+    private final String evidence;
+    private final String recommendation;
+    private final String firstSeen;     // ISO-ish string
+
+    public Finding(
+            String type,
+            Severity severity,
+            int confidence,
+            String url,
+            String host,
+            String title,
+            String summary,
+            String evidence,
+            String recommendation
+    ) {
+        this(type, severity, confidence, url, host, title, summary, evidence, recommendation, Instant.now().toString());
+    }
+
+    public Finding(
+            String type,
+            Severity severity,
+            int confidence,
+            String url,
+            String host,
+            String title,
+            String summary,
+            String evidence,
+            String recommendation,
+            String firstSeen
+    ) {
+        this.type = Objects.requireNonNull(type, "type");
+        this.severity = Objects.requireNonNull(severity, "severity");
+        this.confidence = clamp(confidence, 0, 100);
+
+        this.url = safe(url);
+        this.host = safe(host);
+        this.title = safe(title);
+        this.summary = safe(summary);
+        this.evidence = safe(evidence);
+        this.recommendation = safe(recommendation);
+        this.firstSeen = safe(firstSeen);
+    }
+
+    // --- existing getters used by UI ---
+    public String type() { return type; }
+    public String url() { return url; }
+    public String host() { return host; }
+    public String title() { return title; }
+    public String summary() { return summary; }
+    public String evidence() { return evidence; }
+    public String recommendation() { return recommendation; }
+    public String firstSeen() { return firstSeen; }
+
+    // --- new ---
+    public Severity severity() { return severity; }
+    public int confidence() { return confidence; }
+
+    // Stable dedupe key (type+url+evidence signature)
+    public String stableKey() {
+        String ev = evidence;
+        if (ev.length() > 200) ev = ev.substring(0, 200);
+        return type + "|" + url + "|" + Integer.toHexString(ev.hashCode());
+    }
+
+    private static int clamp(int v, int lo, int hi) {
+        return Math.max(lo, Math.min(hi, v));
+    }
+
+    private static String safe(String s) {
+        return s == null ? "" : s;
     }
 }
