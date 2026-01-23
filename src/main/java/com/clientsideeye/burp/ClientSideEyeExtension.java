@@ -5,9 +5,13 @@ import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.ByteArray;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.responses.HttpResponse;
+import burp.api.montoya.scanner.AuditResult;
+import burp.api.montoya.scanner.ConsolidationAction;
 import burp.api.montoya.scanner.ScanCheck;
 import burp.api.montoya.scanner.audit.insertionpoint.AuditInsertionPoint;
-import burp.api.montoya.scanner.audit.issues.*;
+import burp.api.montoya.scanner.audit.issues.AuditIssue;
+import burp.api.montoya.scanner.audit.issues.AuditIssueConfidence;
+import burp.api.montoya.scanner.audit.issues.AuditIssueSeverity;
 
 import com.clientsideeye.burp.core.Analyzer;
 import com.clientsideeye.burp.core.Finding;
@@ -17,6 +21,9 @@ import javax.swing.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+
+import static burp.api.montoya.scanner.AuditResult.auditResult;
+import static burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue;
 
 public class ClientSideEyeExtension implements BurpExtension {
 
@@ -39,9 +46,9 @@ public class ClientSideEyeExtension implements BurpExtension {
         tab = new ClientSideEyeTab(api, bg);
         api.userInterface().registerSuiteTab("ClientSideEye", tab);
 
+        // OK, though deprecated; compiles on 2025.12
         api.scanner().registerScanCheck(new ClientSideEyeScanCheck());
 
-        // Acceptance criteria: unload cleanly
         api.extension().registerUnloadingHandler(() -> {
             try { if (tab != null) tab.onUnload(); }
             catch (Exception e) { api.logging().logToError("ClientSideEye unload error (tab): " + e); }
@@ -59,43 +66,59 @@ public class ClientSideEyeExtension implements BurpExtension {
     private class ClientSideEyeScanCheck implements ScanCheck {
 
         @Override
-        public List<AuditIssue> passiveAudit(HttpRequestResponse baseRequestResponse) {
-            // Acceptance criteria: do NOT do outbound comms in passiveAudit
+        public AuditResult passiveAudit(HttpRequestResponse baseRequestResponse) {
+            // Passive must not make new HTTP requests. :contentReference[oaicite:5]{index=5}
             return analyzeAndReport(baseRequestResponse, false);
         }
 
         @Override
-        public List<AuditIssue> activeAudit(HttpRequestResponse baseRequestResponse, AuditInsertionPoint insertionPoint) {
-            // We do not probe insertion points or issue requests; we analyze encountered responses during active scan runs.
+        public AuditResult activeAudit(HttpRequestResponse baseRequestResponse, AuditInsertionPoint auditInsertionPoint) {
+            // This check does not send probe requests; it just analyzes the observed base response.
             return analyzeAndReport(baseRequestResponse, true);
         }
 
-        private List<AuditIssue> analyzeAndReport(HttpRequestResponse base, boolean isActive) {
+        @Override
+        public ConsolidationAction consolidateIssues(AuditIssue existingIssue, AuditIssue newIssue) {
+            // If same baseUrl + same name => treat as duplicate.
+            try {
+                if (existingIssue != null && newIssue != null
+                        && Objects.equals(existingIssue.baseUrl(), newIssue.baseUrl())
+                        && Objects.equals(existingIssue.name(), newIssue.name())) {
+                    return ConsolidationAction.KEEP_EXISTING;
+                }
+            } catch (Exception ignored) {}
+            return ConsolidationAction.KEEP_BOTH;
+        }
+
+        private AuditResult analyzeAndReport(HttpRequestResponse base, boolean isActive) {
             try {
                 HttpResponse resp = base.response();
-                if (resp == null) return List.of();
+                if (resp == null) return auditResult();
 
                 String ct = contentType(resp);
-                if (!looksLikeHtml(ct, resp.body())) return List.of();
+                if (!looksLikeHtml(ct, resp.body())) return auditResult();
 
                 String body = safeBody(resp.body());
-                if (body.isBlank()) return List.of();
+                if (body.isBlank()) return auditResult();
 
                 String url = base.request().url();
                 String host = base.request().httpService().host();
 
                 List<Finding> findings = Analyzer.analyze(url, host, body);
-                if (findings.isEmpty()) return List.of();
+                if (findings.isEmpty()) return auditResult();
 
                 SwingUtilities.invokeLater(() -> tab.addFindings(findings));
 
                 List<AuditIssue> issues = new ArrayList<>(findings.size());
-                for (Finding f : findings) issues.add(toIssue(base, f, isActive));
-                return issues;
+                for (Finding f : findings) {
+                    issues.add(toIssue(base, f, isActive));
+                }
+
+                return auditResult(issues);
 
             } catch (Exception e) {
                 api.logging().logToError("ClientSideEye scancheck error: " + e);
-                return List.of();
+                return auditResult();
             }
         }
 
@@ -113,22 +136,11 @@ public class ClientSideEyeExtension implements BurpExtension {
                 default -> AuditIssueConfidence.TENTATIVE;
             };
 
-            String desc = """
-                    ClientSideEye detected a client-side control signal.
-
-                    Evidence:
-                    %s
-
-                    Notes:
-                    - This is heuristic signal detection. Hidden/disabled UI controls often indicate UI-only access control.
-                    - Validate impact with server-side authorization testing.
-                    """.formatted(f.evidence);
-
             String remediation = switch (f.type) {
                 case PASSWORD_VALUE_IN_DOM ->
                         "Do not embed secrets client-side. Only return secrets to authorized users via protected endpoints. Enforce access control server-side.";
                 case HIDDEN_OR_DISABLED_CONTROL ->
-                        "Do not rely on hidden/disabled controls for access control. Enforce authorization server-side for every action/object.";
+                        "Do not rely on hidden/disabled UI controls for access control. Enforce authorization server-side for every action/object.";
                 case ROLE_PERMISSION_HINT ->
                         "Avoid exposing sensitive authorization logic in client-side markup. Never rely on it for enforcement.";
                 case INLINE_SCRIPT_SECRETISH ->
@@ -136,23 +148,39 @@ public class ClientSideEyeExtension implements BurpExtension {
             };
 
             String title = f.title + (isActive ? " (during active scan)" : "");
+            String detail = """
+                    ClientSideEye detected a client-side control signal.
 
-            AuditIssueDefinition def = AuditIssueDefinitionBuilder.auditIssueDefinitionBuilder()
-                    .name(title)
-                    .type(AuditIssueType.GENERIC)
-                    .build();
+                    Evidence:
+                    %s
 
-            AuditIssueDetail detail = AuditIssueDetailBuilder.auditIssueDetailBuilder()
-                    .description(desc + "\nRemediation:\n" + remediation)
-                    .build();
+                    Validation guidance:
+                    - Confirm server-side enforcement by invoking the underlying request/action directly (Repeater).
+                    - Attempt privilege transitions using a low-privileged account/session.
+                    """.formatted(escapeHtml(f.evidence));
 
-            return AuditIssueBuilder.auditIssueBuilder()
-                    .auditIssueDefinition(def)
-                    .severity(sev)
-                    .confidence(conf)
-                    .detail(detail)
-                    .baseRequestResponse(base)
-                    .build();
+            String background = """
+                    Some applications implement authorization in the UI by hiding/disable controls or masking sensitive values.
+                    These measures do not provide security if the server still returns the data or accepts the action.
+                    """;
+
+            String remediationBackground = """
+                    Enforce authorization server-side for every request and object. Do not return secrets to the client unless required and authorized.
+                    """;
+
+            // Use Montoya static factory. :contentReference[oaicite:6]{index=6}
+            return auditIssue(
+                    title,
+                    detail,
+                    escapeHtml(remediation),
+                    base.request().url(),
+                    sev,
+                    conf,
+                    escapeHtml(background),
+                    escapeHtml(remediationBackground),
+                    sev,
+                    base
+            );
         }
 
         private String safeBody(ByteArray body) {
@@ -178,6 +206,14 @@ public class ClientSideEyeExtension implements BurpExtension {
             String b = safeBody(body);
             String s = b.stripLeading().toLowerCase(Locale.ROOT);
             return s.startsWith("<!doctype html") || s.startsWith("<html") || s.contains("<input") || s.contains("<form");
+        }
+
+        private String escapeHtml(String s) {
+            if (s == null) return "";
+            // Burp applies an HTML whitelist; keep it simple and safe.
+            return s.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;");
         }
     }
 }
