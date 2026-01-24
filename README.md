@@ -13,9 +13,11 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 - Analyzes in-scope Site Map traffic
 
 ## Installation
-1. Build the extension:
-   ```bash
-   gradle clean jar
+
+### Recommended
+
+
+1. Download the latest ```ClientSideEye-Burp.jar```
 2. In Burp Suite:
 
 - Extensions → Installed → Add
@@ -23,6 +25,11 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 - Extension type: Java
 
 - Select the generated JAR
+
+### Build from source
+1. Build the extension:
+   ```bash
+   gradle clean jar
 
 ## Usage
 
