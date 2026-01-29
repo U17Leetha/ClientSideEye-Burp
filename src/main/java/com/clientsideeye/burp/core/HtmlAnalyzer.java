@@ -69,7 +69,7 @@ public final class HtmlAnalyzer {
             ));
         }
 
-        // 2) Hidden/disabled actionable controls (triage with heuristics)
+        // 2) Hidden/disabled controls (elevate only if likely state-changing)
         // We look for common interactive elements that are hidden/disabled via attributes or inline styles.
         Pattern control = Pattern.compile(
                 "(?is)<(button|a|input)\\b([^>]*)>"
@@ -95,24 +95,41 @@ public final class HtmlAnalyzer {
                 // Password inputs handled above (value in DOM). Here we treat hidden/disabled password fields as controls too.
             }
 
-            Score s = scoreControlRisk(attrs, full);
-            Severity sev = severityForHiddenControl(s);
-
+            ControlSignals s = scoreControlSignals(tag, attrs, full);
             String why = s.reasons.isEmpty() ? "" : ("Signals: " + String.join(", ", s.reasons) + ".");
             String state = (isHidden ? "hidden" : "") + (isHidden && isDisabled ? " & " : "") + (isDisabled ? "disabled" : "");
-            String title = "Client-side " + state + " control present in HTML";
 
-            out.add(new Finding(
-                    FindingType.HIDDEN_OR_DISABLED_CONTROL.name(),
-                    sev,
-                    s.confidence,
-                    url,
-                    host,
-                    title,
-                    "An interactive control is present in the HTML but is " + state + " on the client side. If server-side authorization is missing, users may be able to enable/trigger privileged actions. " + why,
-                    shrink(full, 420),
-                    "Do not rely on client-side hiding/disabled states for authorization. Enforce authorization server-side for all actions. Prefer not rendering unauthorized controls at all (or render in a non-actionable form)."
-            ));
+            if (s.actionable) {
+                Severity sev = severityForActionableHiddenControl(s.confidence);
+                String title = "Client-side " + state + " control likely to perform an action";
+
+                out.add(new Finding(
+                        FindingType.HIDDEN_OR_DISABLED_CONTROL.name(),
+                        sev,
+                        s.confidence,
+                        url,
+                        host,
+                        title,
+                        "An interactive control is present in the HTML but is " + state + " on the client side and appears actionable. If server-side authorization is missing, users may be able to enable/trigger privileged actions. " + why,
+                        shrink(full, 420),
+                        "Do not rely on client-side hiding/disabled states for authorization. Enforce authorization server-side for all actions. Prefer not rendering unauthorized controls at all (or render in a non-actionable form)."
+                ));
+            } else {
+                int infoConf = Math.min(45, Math.max(15, s.confidence));
+                String title = "Hidden/disabled control detected (informational)";
+
+                out.add(new Finding(
+                        FindingType.HIDDEN_OR_DISABLED_CONTROL.name(),
+                        Severity.INFO,
+                        infoConf,
+                        url,
+                        host,
+                        title,
+                        "A control is present in the HTML but is " + state + " on the client side. It does not show clear signals of a state-changing action. " + why,
+                        shrink(full, 420),
+                        "If this control maps to privileged actions, ensure authorization is enforced server-side. Otherwise, consider removing it from the DOM for unauthorized users."
+                ));
+            }
         }
 
         // 3) Role/permission hints (mostly informational, sometimes useful)
@@ -164,6 +181,16 @@ public final class HtmlAnalyzer {
                 || a.contains("\thidden")
                 || a.contains("hidden=")
                 || a.matches(".*\\bhidden\\b.*")
+                || a.contains("aria-hidden=\"true\"")
+                || a.contains("aria-hidden='true'")
+                || a.contains("class=\"hidden\"")
+                || a.contains("class='hidden'")
+                || a.contains("class=\"d-none\"")
+                || a.contains("class='d-none'")
+                || a.contains("class=\"sr-only\"")
+                || a.contains("class='sr-only'")
+                || a.contains("class=\"visually-hidden\"")
+                || a.contains("class='visually-hidden'")
                 || a.contains("display:none")
                 || a.contains("display: none")
                 || a.contains("visibility:hidden")
@@ -176,7 +203,9 @@ public final class HtmlAnalyzer {
         String a = (attrs + " " + fullTag).toLowerCase(Locale.ROOT);
         return a.contains(" disabled")
                 || a.contains("\tdisabled")
-                || a.contains("disabled=");
+                || a.contains("disabled=")
+                || a.contains("aria-disabled=\"true\"")
+                || a.contains("aria-disabled='true'");
     }
 
     private static String extractAttr(String attrs, String name) {
@@ -186,38 +215,72 @@ public final class HtmlAnalyzer {
         return "";
     }
 
-    private static class Score {
+    private static class ControlSignals {
         int confidence;
+        boolean actionable;
         List<String> reasons = new ArrayList<>();
     }
 
-    private static Score scoreControlRisk(String attrs, String fullTag) {
-        Score s = new Score();
-        int conf = 25; // baseline "it exists but hidden/disabled"
+    private static ControlSignals scoreControlSignals(String tag, String attrs, String fullTag) {
+        ControlSignals s = new ControlSignals();
+        int conf = 10; // baseline "hidden/disabled control exists"
+        int action = 0;
 
         String lower = (attrs + " " + fullTag).toLowerCase(Locale.ROOT);
 
-        // Action signals
+        // Action signals (strong)
         if (lower.contains("onclick=") || lower.contains("onmousedown=") || lower.contains("onmouseup=") || lower.contains("onchange=")) {
-            conf += 35;
+            action += 30;
             s.reasons.add("event handler");
         }
-        if (lower.contains("href=")) {
-            conf += 25;
-            s.reasons.add("href");
+        if (lower.contains("formaction=") || lower.contains("formmethod=") || lower.contains("form=")) {
+            action += 30;
+            s.reasons.add("form action");
         }
         if (lower.contains("type=\"submit\"") || lower.contains("type='submit'")) {
-            conf += 25;
+            action += 30;
             s.reasons.add("submit");
         }
 
+        // Links and data-* endpoints
+        String href = extractAttr(attrs, "href").toLowerCase(Locale.ROOT);
+        if (!href.isBlank()) {
+            if (href.startsWith("#") || href.startsWith("javascript:")) {
+                action += 10;
+                s.reasons.add("href (weak)");
+            } else {
+                action += 25;
+                s.reasons.add("href");
+            }
+        }
+        if (hasAnyAttr(attrs, "data-action", "data-url", "data-endpoint", "data-method")) {
+            action += 20;
+            s.reasons.add("data-* action");
+        }
+
+        // Tag-specific hints
+        if ("button".equals(tag)) action += 10;
+        if ("input".equals(tag)) {
+            String type = extractAttr(attrs, "type").toLowerCase(Locale.ROOT);
+            if (type.equals("button") || type.equals("submit") || type.equals("image") || type.equals("reset")) action += 15;
+        }
+        if (lower.contains("role=\"button\"") || lower.contains("role='button'")) {
+            action += 10;
+            s.reasons.add("role=button");
+        }
+
+        // Privileged keyword boost (narrowed to specific attrs)
         String id = extractAttr(attrs, "id").toLowerCase(Locale.ROOT);
         String name = extractAttr(attrs, "name").toLowerCase(Locale.ROOT);
         String value = extractAttr(attrs, "value").toLowerCase(Locale.ROOT);
+        String ariaLabel = extractAttr(attrs, "aria-label").toLowerCase(Locale.ROOT);
+        String title = extractAttr(attrs, "title").toLowerCase(Locale.ROOT);
+        String dataAction = extractAttr(attrs, "data-action").toLowerCase(Locale.ROOT);
+        String dataUrl = extractAttr(attrs, "data-url").toLowerCase(Locale.ROOT);
+        String dataEndpoint = extractAttr(attrs, "data-endpoint").toLowerCase(Locale.ROOT);
 
-        String idNameBlob = (id + " " + name + " " + value + " " + lower);
+        String idNameBlob = String.join(" ", id, name, value, ariaLabel, title, href, dataAction, dataUrl, dataEndpoint);
 
-        // Privileged keywords bump
         int keywordHits = 0;
         for (String k : RISK_KEYWORDS) {
             if (idNameBlob.contains(k)) keywordHits++;
@@ -233,22 +296,23 @@ public final class HtmlAnalyzer {
             s.reasons.add("webforms-ish id/name");
         }
 
-        // If evidence shows form action nearby (weak signal)
-        if (lower.contains("<form") || lower.contains("formaction=")) {
-            conf += 5;
-            s.reasons.add("form context");
-        }
-
-        s.confidence = Math.max(0, Math.min(100, conf));
+        int combined = conf + action;
+        s.confidence = Math.max(0, Math.min(100, combined));
+        s.actionable = action >= 60;
         return s;
     }
 
-    private static Severity severityForHiddenControl(Score s) {
-        // Default: MEDIUM only when it looks actionable, else LOW/INFO to reduce noise.
-        if (s.confidence >= 85) return Severity.HIGH;
-        if (s.confidence >= 60) return Severity.MEDIUM;
-        if (s.confidence >= 35) return Severity.LOW;
-        return Severity.INFO;
+    private static boolean hasAnyAttr(String attrs, String... names) {
+        for (String n : names) {
+            if (!extractAttr(attrs, n).isBlank()) return true;
+        }
+        return false;
+    }
+
+    private static Severity severityForActionableHiddenControl(int confidence) {
+        if (confidence >= 85) return Severity.HIGH;
+        if (confidence >= 60) return Severity.MEDIUM;
+        return Severity.LOW;
     }
 
     private static boolean looksSecretish(String scriptBody) {

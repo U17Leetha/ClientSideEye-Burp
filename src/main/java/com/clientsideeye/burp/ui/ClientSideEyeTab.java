@@ -49,11 +49,10 @@ public class ClientSideEyeTab extends JPanel {
             FindingType.INLINE_SCRIPT_SECRETISH.name()
     });
 
-    private final JComboBox<String> filterRisk = new JComboBox<>(new String[]{
-            "All",
-            "High + Medium",
-            "High only"
-    });
+    private final JCheckBox filterHigh = new JCheckBox("High", true);
+    private final JCheckBox filterMedium = new JCheckBox("Medium", true);
+    private final JCheckBox filterLow = new JCheckBox("Low", true);
+    private final JCheckBox filterInfo = new JCheckBox("Informational", true);
 
     public ClientSideEyeTab(MontoyaApi api, ExecutorService bg) {
         super(new BorderLayout(10, 10));
@@ -81,10 +80,16 @@ public class ClientSideEyeTab extends JPanel {
         controls.add(filterType, c);
 
         c.gridx = 4; c.gridy = 0; c.weightx = 0;
-        controls.add(new JLabel("Risk:"), c);
+        controls.add(new JLabel("Severity:"), c);
 
-        c.gridx = 5; c.gridy = 0; c.weightx = 0.4;
-        controls.add(filterRisk, c);
+        c.gridx = 5; c.gridy = 0; c.weightx = 0.0;
+        controls.add(filterHigh, c);
+        c.gridx = 6; c.gridy = 0; c.weightx = 0.0;
+        controls.add(filterMedium, c);
+        c.gridx = 7; c.gridy = 0; c.weightx = 0.0;
+        controls.add(filterLow, c);
+        c.gridx = 8; c.gridy = 0; c.weightx = 0.0;
+        controls.add(filterInfo, c);
 
         JButton btnApply = new JButton("Apply");
         JButton btnClear = new JButton("Clear");
@@ -93,13 +98,13 @@ public class ClientSideEyeTab extends JPanel {
         JButton btnView = new JButton("View in Browser…");
         JButton btnPurge = new JButton("Clear Findings");
 
-        c.gridx = 6; c.gridy = 0; c.weightx = 0;
+        c.gridx = 9; c.gridy = 0; c.weightx = 0;
         controls.add(btnApply, c);
-        c.gridx = 7; controls.add(btnClear, c);
-        c.gridx = 8; controls.add(btnAnalyzeSiteMap, c);
-        c.gridx = 9; controls.add(btnExport, c);
-        c.gridx = 10; controls.add(btnView, c);
-        c.gridx = 11; controls.add(btnPurge, c);
+        c.gridx = 10; controls.add(btnClear, c);
+        c.gridx = 11; controls.add(btnAnalyzeSiteMap, c);
+        c.gridx = 12; controls.add(btnExport, c);
+        c.gridx = 13; controls.add(btnView, c);
+        c.gridx = 14; controls.add(btnPurge, c);
 
         add(controls, BorderLayout.NORTH);
 
@@ -136,7 +141,10 @@ public class ClientSideEyeTab extends JPanel {
         btnClear.addActionListener(e -> {
             filterHost.setText("");
             filterType.setSelectedIndex(0);
-            filterRisk.setSelectedIndex(0);
+            filterHigh.setSelected(true);
+            filterMedium.setSelected(true);
+            filterLow.setSelected(true);
+            filterInfo.setSelected(true);
             refreshTable();
         });
 
@@ -221,7 +229,10 @@ public class ClientSideEyeTab extends JPanel {
     private void refreshTable() {
         String host = filterHost.getText().trim().toLowerCase(Locale.ROOT);
         String type = String.valueOf(filterType.getSelectedItem());
-        String risk = String.valueOf(filterRisk.getSelectedItem());
+        boolean showHigh = filterHigh.isSelected();
+        boolean showMedium = filterMedium.isSelected();
+        boolean showLow = filterLow.isSelected();
+        boolean showInfo = filterInfo.isSelected();
 
         List<Finding> all = new ArrayList<>(findingsByKey.values());
 
@@ -229,9 +240,10 @@ public class ClientSideEyeTab extends JPanel {
                 .filter(f -> host.isEmpty() || f.host().toLowerCase(Locale.ROOT).contains(host))
                 .filter(f -> "All".equals(type) || f.type().equals(type))
                 .filter(f -> {
-                    if ("All".equals(risk)) return true;
-                    if ("High only".equals(risk)) return f.severity() == Severity.HIGH;
-                    return f.severity() == Severity.HIGH || f.severity() == Severity.MEDIUM;
+                    if (f.severity() == Severity.HIGH) return showHigh;
+                    if (f.severity() == Severity.MEDIUM) return showMedium;
+                    if (f.severity() == Severity.LOW) return showLow;
+                    return showInfo;
                 })
                 .collect(Collectors.toList());
 
