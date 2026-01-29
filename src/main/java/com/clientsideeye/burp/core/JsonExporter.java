@@ -7,16 +7,22 @@ public final class JsonExporter {
     private JsonExporter() {}
 
     public static String toJson(List<Finding> findings) {
+        return toJson(findings, null);
+    }
+
+    public static String toJson(List<Finding> findings, java.util.Set<String> falsePositiveKeys) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"tool\":\"ClientSideEye\",\"findings\":[");
         boolean first = true;
         for (Finding f : findings) {
             if (!first) sb.append(",");
             first = false;
+            boolean isFalsePositive = falsePositiveKeys != null && falsePositiveKeys.contains(f.stableKey());
             sb.append("{");
             kv(sb, "type", f.type()); sb.append(",");
             kv(sb, "severity", f.severity().name()); sb.append(",");
             sb.append("\"confidence\":").append(f.confidence()).append(",");
+            sb.append("\"falsePositive\":").append(isFalsePositive).append(",");
             kv(sb, "url", f.url()); sb.append(",");
             kv(sb, "host", f.host()); sb.append(",");
             kv(sb, "title", f.title()); sb.append(",");
@@ -54,4 +60,3 @@ public final class JsonExporter {
         return out.toString();
     }
 }
-

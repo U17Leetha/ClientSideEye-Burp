@@ -6,8 +6,8 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 
-import com.clientsideeye.burp.core.Analyzer;
 import com.clientsideeye.burp.core.Finding;
+import com.clientsideeye.burp.core.HtmlAnalyzer;
 import com.clientsideeye.burp.ui.ClientSideEyeTab;
 
 import javax.swing.*;
@@ -88,7 +88,7 @@ public class ClientSideEyeExtension implements BurpExtension {
                     String body = rr.response().bodyToString();
                     if (body == null || body.isBlank()) continue;
 
-                    List<Finding> findings = Analyzer.analyze(url, host, body);
+                    List<Finding> findings = HtmlAnalyzer.analyzeHtml(url, body);
                     if (!findings.isEmpty()) {
                         tab.addFindings(findings);
                         added += findings.size();

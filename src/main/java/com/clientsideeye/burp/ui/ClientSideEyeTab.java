@@ -33,6 +33,7 @@ public class ClientSideEyeTab extends JPanel {
 
     // Dedupe by stable key -> Finding (LinkedHashMap preserves insertion order)
     private final LinkedHashMap<String, Finding> findingsByKey = new LinkedHashMap<>();
+    private final Set<String> falsePositiveKeys = new HashSet<>();
 
     private final FindingsTableModel tableModel = new FindingsTableModel();
     private final JTable table = new JTable(tableModel);
@@ -49,10 +50,13 @@ public class ClientSideEyeTab extends JPanel {
             FindingType.INLINE_SCRIPT_SECRETISH.name()
     });
 
-    private final JCheckBox filterHigh = new JCheckBox("High", true);
-    private final JCheckBox filterMedium = new JCheckBox("Medium", true);
-    private final JCheckBox filterLow = new JCheckBox("Low", true);
-    private final JCheckBox filterInfo = new JCheckBox("Informational", true);
+    private final JCheckBoxMenuItem filterHigh = new JCheckBoxMenuItem("High", true);
+    private final JCheckBoxMenuItem filterMedium = new JCheckBoxMenuItem("Medium", true);
+    private final JCheckBoxMenuItem filterLow = new JCheckBoxMenuItem("Low", true);
+    private final JCheckBoxMenuItem filterInfo = new JCheckBoxMenuItem("Informational", true);
+    private final JPopupMenu severityMenu = new JPopupMenu();
+    private final JButton severityMenuButton = new JButton("Severity…");
+    private final JCheckBox filterFalsePositive = new JCheckBox("Show false positives", true);
 
     public ClientSideEyeTab(MontoyaApi api, ExecutorService bg) {
         super(new BorderLayout(10, 10));
@@ -82,29 +86,34 @@ public class ClientSideEyeTab extends JPanel {
         c.gridx = 4; c.gridy = 0; c.weightx = 0;
         controls.add(new JLabel("Severity:"), c);
 
+        severityMenu.add(filterHigh);
+        severityMenu.add(filterMedium);
+        severityMenu.add(filterLow);
+        severityMenu.add(filterInfo);
+        severityMenuButton.addActionListener(e ->
+                severityMenu.show(severityMenuButton, 0, severityMenuButton.getHeight()));
+
         c.gridx = 5; c.gridy = 0; c.weightx = 0.0;
-        controls.add(filterHigh, c);
+        controls.add(severityMenuButton, c);
         c.gridx = 6; c.gridy = 0; c.weightx = 0.0;
-        controls.add(filterMedium, c);
-        c.gridx = 7; c.gridy = 0; c.weightx = 0.0;
-        controls.add(filterLow, c);
-        c.gridx = 8; c.gridy = 0; c.weightx = 0.0;
-        controls.add(filterInfo, c);
+        controls.add(filterFalsePositive, c);
 
         JButton btnApply = new JButton("Apply");
         JButton btnClear = new JButton("Clear");
         JButton btnAnalyzeSiteMap = new JButton("Analyze Site Map (in-scope)");
         JButton btnExport = new JButton("Export JSON…");
         JButton btnView = new JButton("View in Browser…");
+        JButton btnToggleFalsePositive = new JButton("Toggle False Positive");
         JButton btnPurge = new JButton("Clear Findings");
 
-        c.gridx = 9; c.gridy = 0; c.weightx = 0;
+        c.gridx = 7; c.gridy = 0; c.weightx = 0;
         controls.add(btnApply, c);
-        c.gridx = 10; controls.add(btnClear, c);
-        c.gridx = 11; controls.add(btnAnalyzeSiteMap, c);
-        c.gridx = 12; controls.add(btnExport, c);
-        c.gridx = 13; controls.add(btnView, c);
-        c.gridx = 14; controls.add(btnPurge, c);
+        c.gridx = 8; controls.add(btnClear, c);
+        c.gridx = 9; controls.add(btnAnalyzeSiteMap, c);
+        c.gridx = 10; controls.add(btnExport, c);
+        c.gridx = 11; controls.add(btnView, c);
+        c.gridx = 12; controls.add(btnToggleFalsePositive, c);
+        c.gridx = 13; controls.add(btnPurge, c);
 
         add(controls, BorderLayout.NORTH);
 
@@ -145,11 +154,13 @@ public class ClientSideEyeTab extends JPanel {
             filterMedium.setSelected(true);
             filterLow.setSelected(true);
             filterInfo.setSelected(true);
+            filterFalsePositive.setSelected(true);
             refreshTable();
         });
 
         btnPurge.addActionListener(e -> {
             findingsByKey.clear();
+            falsePositiveKeys.clear();
             refreshTable();
             detailArea.setText("");
         });
@@ -157,6 +168,12 @@ public class ClientSideEyeTab extends JPanel {
         btnExport.addActionListener(e -> exportJson());
         btnView.addActionListener(e -> showViewInBrowserDialog());
         btnAnalyzeSiteMap.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
+        btnToggleFalsePositive.addActionListener(e -> toggleFalsePositiveForSelection());
+        filterHigh.addActionListener(e -> refreshTable());
+        filterMedium.addActionListener(e -> refreshTable());
+        filterLow.addActionListener(e -> refreshTable());
+        filterInfo.addActionListener(e -> refreshTable());
+        filterFalsePositive.addActionListener(e -> refreshTable());
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
@@ -233,6 +250,7 @@ public class ClientSideEyeTab extends JPanel {
         boolean showMedium = filterMedium.isSelected();
         boolean showLow = filterLow.isSelected();
         boolean showInfo = filterInfo.isSelected();
+        boolean showFalsePositives = filterFalsePositive.isSelected();
 
         List<Finding> all = new ArrayList<>(findingsByKey.values());
 
@@ -245,6 +263,7 @@ public class ClientSideEyeTab extends JPanel {
                     if (f.severity() == Severity.LOW) return showLow;
                     return showInfo;
                 })
+                .filter(f -> showFalsePositives || !isFalsePositive(f))
                 .collect(Collectors.toList());
 
         tableModel.setRows(filtered);
@@ -257,6 +276,29 @@ public class ClientSideEyeTab extends JPanel {
         }
     }
 
+    private void toggleFalsePositiveForSelection() {
+        int viewRow = table.getSelectedRow();
+        if (viewRow < 0) {
+            JOptionPane.showMessageDialog(this, "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int modelRow = table.convertRowIndexToModel(viewRow);
+        Finding f = tableModel.getAt(modelRow);
+        if (f == null) return;
+
+        String key = f.stableKey();
+        if (falsePositiveKeys.contains(key)) {
+            falsePositiveKeys.remove(key);
+        } else {
+            falsePositiveKeys.add(key);
+        }
+
+        refreshTable();
+        detailArea.setText(renderFinding(f));
+        detailArea.setCaretPosition(0);
+    }
+
+
     private void exportJson() {
         try {
             JFileChooser chooser = new JFileChooser();
@@ -266,7 +308,7 @@ public class ClientSideEyeTab extends JPanel {
             if (res != JFileChooser.APPROVE_OPTION) return;
 
             File out = chooser.getSelectedFile();
-            String json = JsonExporter.toJson(new ArrayList<>(findingsByKey.values()));
+            String json = JsonExporter.toJson(new ArrayList<>(findingsByKey.values()), falsePositiveKeys);
             Files.writeString(out.toPath(), json);
 
             api.logging().logToOutput("[ClientSideEye] Exported: " + out.getAbsolutePath());
@@ -441,6 +483,7 @@ public class ClientSideEyeTab extends JPanel {
     private String renderFinding(Finding f) {
         return ""
                 + "Severity: " + f.severity() + " (" + f.confidence() + ")\n"
+                + "False positive: " + (isFalsePositive(f) ? "yes" : "no") + "\n"
                 + "Type: " + f.type() + "\n"
                 + "URL: " + f.url() + "\n"
                 + "Host: " + f.host() + "\n"
@@ -454,12 +497,16 @@ public class ClientSideEyeTab extends JPanel {
                 + "Recommendation:\n" + f.recommendation() + "\n";
     }
 
+    private boolean isFalsePositive(Finding f) {
+        return f != null && falsePositiveKeys.contains(f.stableKey());
+    }
+
     // -------------------------
     // Table model
     // -------------------------
-    private static class FindingsTableModel extends AbstractTableModel {
+    private class FindingsTableModel extends AbstractTableModel {
 
-        private final String[] cols = new String[]{"Severity", "Confidence", "Type", "Host", "Title", "URL"};
+        private final String[] cols = new String[]{"Severity", "Confidence", "FP", "Type", "Host", "Title", "URL"};
         private List<Finding> rows = List.of();
 
         void setRows(List<Finding> rows) {
@@ -482,17 +529,18 @@ public class ClientSideEyeTab extends JPanel {
             return switch (columnIndex) {
                 case 0 -> f.severity().name();
                 case 1 -> String.valueOf(f.confidence());
-                case 2 -> f.type();
-                case 3 -> f.host();
-                case 4 -> f.title();
-                case 5 -> f.url();
+                case 2 -> isFalsePositive(f) ? "yes" : "";
+                case 3 -> f.type();
+                case 4 -> f.host();
+                case 5 -> f.title();
+                case 6 -> f.url();
                 default -> "";
             };
         }
     }
 
     // Row renderer to highlight risk
-    private static class SeverityRowRenderer extends DefaultTableCellRenderer {
+    private class SeverityRowRenderer extends DefaultTableCellRenderer {
         private final FindingsTableModel model;
 
         SeverityRowRenderer(FindingsTableModel model) {
@@ -509,15 +557,41 @@ public class ClientSideEyeTab extends JPanel {
             Finding f = model.getAt(modelRow);
             if (f == null) return c;
 
-            Color bg = switch (f.severity()) {
-                case HIGH -> new Color(255, 230, 230);
-                case MEDIUM -> new Color(255, 242, 220);
-                case LOW -> new Color(240, 240, 240);
-                case INFO -> new Color(248, 248, 248);
-            };
+            Color bg = severityBackground(f.severity());
 
             c.setBackground(bg);
+            c.setForeground(table.getForeground());
             return c;
         }
+    }
+
+    private Color severityBackground(Severity severity) {
+        Color base = UIManager.getColor("Table.background");
+        if (base == null) base = Color.WHITE;
+        Color accent = UIManager.getColor("Table.selectionBackground");
+        if (accent == null) accent = base.darker();
+
+        double blend = switch (severity) {
+            case HIGH -> 0.35;
+            case MEDIUM -> 0.25;
+            case LOW -> 0.12;
+            case INFO -> 0.06;
+        };
+        return blend(base, accent, blend);
+    }
+
+    private boolean isDarkTheme() {
+        Color bg = UIManager.getColor("Table.background");
+        if (bg == null) bg = Color.WHITE;
+        double luminance = (0.2126 * bg.getRed() + 0.7152 * bg.getGreen() + 0.0722 * bg.getBlue()) / 255.0;
+        return luminance < 0.45;
+    }
+
+    private Color blend(Color base, Color accent, double ratio) {
+        double r = Math.max(0.0, Math.min(1.0, ratio));
+        int red = (int) Math.round(base.getRed() * (1.0 - r) + accent.getRed() * r);
+        int green = (int) Math.round(base.getGreen() * (1.0 - r) + accent.getGreen() * r);
+        int blue = (int) Math.round(base.getBlue() * (1.0 - r) + accent.getBlue() * r);
+        return new Color(red, green, blue);
     }
 }
