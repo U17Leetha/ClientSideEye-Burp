@@ -42,13 +42,12 @@ public class ClientSideEyeTab extends JPanel {
     private final JTextArea detailArea = new JTextArea();
     private final JTextField filterHost = new JTextField();
 
-    private final JComboBox<String> filterType = new JComboBox<>(new String[]{
-            "All",
-            FindingType.PASSWORD_VALUE_IN_DOM.name(),
-            FindingType.HIDDEN_OR_DISABLED_CONTROL.name(),
-            FindingType.ROLE_PERMISSION_HINT.name(),
-            FindingType.INLINE_SCRIPT_SECRETISH.name()
-    });
+    private final JCheckBoxMenuItem filterTypePassword = new JCheckBoxMenuItem(FindingType.PASSWORD_VALUE_IN_DOM.name(), true);
+    private final JCheckBoxMenuItem filterTypeHidden = new JCheckBoxMenuItem(FindingType.HIDDEN_OR_DISABLED_CONTROL.name(), true);
+    private final JCheckBoxMenuItem filterTypeRole = new JCheckBoxMenuItem(FindingType.ROLE_PERMISSION_HINT.name(), true);
+    private final JCheckBoxMenuItem filterTypeInline = new JCheckBoxMenuItem(FindingType.INLINE_SCRIPT_SECRETISH.name(), true);
+    private final JPopupMenu typeMenu = new JPopupMenu();
+    private final JButton typeMenuButton = new JButton("Type…");
 
     private final JCheckBoxMenuItem filterHigh = new JCheckBoxMenuItem("High", true);
     private final JCheckBoxMenuItem filterMedium = new JCheckBoxMenuItem("Medium", true);
@@ -80,8 +79,15 @@ public class ClientSideEyeTab extends JPanel {
         c.gridx = 2; c.gridy = 0; c.weightx = 0;
         controls.add(new JLabel("Type:"), c);
 
+        typeMenu.add(filterTypePassword);
+        typeMenu.add(filterTypeHidden);
+        typeMenu.add(filterTypeRole);
+        typeMenu.add(filterTypeInline);
+        typeMenuButton.addActionListener(e ->
+                typeMenu.show(typeMenuButton, 0, typeMenuButton.getHeight()));
+
         c.gridx = 3; c.gridy = 0; c.weightx = 0.5;
-        controls.add(filterType, c);
+        controls.add(typeMenuButton, c);
 
         c.gridx = 4; c.gridy = 0; c.weightx = 0;
         controls.add(new JLabel("Severity:"), c);
@@ -103,7 +109,6 @@ public class ClientSideEyeTab extends JPanel {
         JButton btnAnalyzeSiteMap = new JButton("Analyze Site Map (in-scope)");
         JButton btnExport = new JButton("Export JSON…");
         JButton btnView = new JButton("View in Browser…");
-        JButton btnToggleFalsePositive = new JButton("Toggle False Positive");
         JButton btnPurge = new JButton("Clear Findings");
 
         c.gridx = 7; c.gridy = 0; c.weightx = 0;
@@ -112,8 +117,7 @@ public class ClientSideEyeTab extends JPanel {
         c.gridx = 9; controls.add(btnAnalyzeSiteMap, c);
         c.gridx = 10; controls.add(btnExport, c);
         c.gridx = 11; controls.add(btnView, c);
-        c.gridx = 12; controls.add(btnToggleFalsePositive, c);
-        c.gridx = 13; controls.add(btnPurge, c);
+        c.gridx = 12; controls.add(btnPurge, c);
 
         add(controls, BorderLayout.NORTH);
 
@@ -149,7 +153,10 @@ public class ClientSideEyeTab extends JPanel {
         btnApply.addActionListener(e -> refreshTable());
         btnClear.addActionListener(e -> {
             filterHost.setText("");
-            filterType.setSelectedIndex(0);
+            filterTypePassword.setSelected(true);
+            filterTypeHidden.setSelected(true);
+            filterTypeRole.setSelected(true);
+            filterTypeInline.setSelected(true);
             filterHigh.setSelected(true);
             filterMedium.setSelected(true);
             filterLow.setSelected(true);
@@ -168,12 +175,15 @@ public class ClientSideEyeTab extends JPanel {
         btnExport.addActionListener(e -> exportJson());
         btnView.addActionListener(e -> showViewInBrowserDialog());
         btnAnalyzeSiteMap.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
-        btnToggleFalsePositive.addActionListener(e -> toggleFalsePositiveForSelection());
         filterHigh.addActionListener(e -> refreshTable());
         filterMedium.addActionListener(e -> refreshTable());
         filterLow.addActionListener(e -> refreshTable());
         filterInfo.addActionListener(e -> refreshTable());
         filterFalsePositive.addActionListener(e -> refreshTable());
+        filterTypePassword.addActionListener(e -> refreshTable());
+        filterTypeHidden.addActionListener(e -> refreshTable());
+        filterTypeRole.addActionListener(e -> refreshTable());
+        filterTypeInline.addActionListener(e -> refreshTable());
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
@@ -190,6 +200,26 @@ public class ClientSideEyeTab extends JPanel {
             }
             detailArea.setText(renderFinding(f));
             detailArea.setCaretPosition(0);
+        });
+
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            private void maybeToggleFalsePositive(java.awt.event.MouseEvent e) {
+                if (!e.isPopupTrigger() && !SwingUtilities.isRightMouseButton(e)) return;
+                int viewRow = table.rowAtPoint(e.getPoint());
+                if (viewRow < 0) return;
+                table.setRowSelectionInterval(viewRow, viewRow);
+                toggleFalsePositiveForSelection();
+            }
+
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                maybeToggleFalsePositive(e);
+            }
+
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                maybeToggleFalsePositive(e);
+            }
         });
 
         refreshTable();
@@ -245,18 +275,18 @@ public class ClientSideEyeTab extends JPanel {
 
     private void refreshTable() {
         String host = filterHost.getText().trim().toLowerCase(Locale.ROOT);
-        String type = String.valueOf(filterType.getSelectedItem());
         boolean showHigh = filterHigh.isSelected();
         boolean showMedium = filterMedium.isSelected();
         boolean showLow = filterLow.isSelected();
         boolean showInfo = filterInfo.isSelected();
         boolean showFalsePositives = filterFalsePositive.isSelected();
+        Set<String> allowedTypes = selectedTypes();
 
         List<Finding> all = new ArrayList<>(findingsByKey.values());
 
         List<Finding> filtered = all.stream()
                 .filter(f -> host.isEmpty() || f.host().toLowerCase(Locale.ROOT).contains(host))
-                .filter(f -> "All".equals(type) || f.type().equals(type))
+                .filter(f -> allowedTypes.contains(f.type()))
                 .filter(f -> {
                     if (f.severity() == Severity.HIGH) return showHigh;
                     if (f.severity() == Severity.MEDIUM) return showMedium;
@@ -333,25 +363,28 @@ public class ClientSideEyeTab extends JPanel {
         String id = extractAttr(evidence, "id");
         String name = extractAttr(evidence, "name");
         String href = extractAttr(evidence, "href");
+        String src = extractAttr(evidence, "src");
+        String action = extractAttr(evidence, "action");
+        String bestSelector = bestCssSelector(id, name, href, src, action);
 
         DefaultComboBoxModel<String> hintModel = new DefaultComboBoxModel<>();
 
+        if (!bestSelector.isBlank()) {
+            hintModel.addElement("Console (Chrome/Firefox): inspect(document.querySelector('" + bestSelector + "'))");
+            hintModel.addElement("Console (Chrome/Firefox): document.querySelector('" + bestSelector + "')?.scrollIntoView({block:'center'})");
+            hintModel.addElement("Elements/Inspector search (Chrome/Firefox): " + bestSelector);
+        }
+
         if (!id.isBlank()) {
-            hintModel.addElement("Console (recommended): inspect(document.querySelector('#" + id + "'))");
-            hintModel.addElement("CSS selector: #" + id);
-            hintModel.addElement("Firefox Inspector text: id=\"" + id + "\"");
-            hintModel.addElement("Firefox Inspector text: " + id);
+            hintModel.addElement("Inspector text: id=\"" + id + "\"");
         }
 
         if (!name.isBlank()) {
-            hintModel.addElement("CSS selector: [name=\"" + name + "\"]");
-            hintModel.addElement("Firefox Inspector text: name=\"" + name + "\"");
+            hintModel.addElement("Inspector text: name=\"" + name + "\"");
         }
 
         if (!href.isBlank()) {
-            hintModel.addElement("Console: inspect(document.querySelector('a[href=\"" + href + "\"]'))");
-            hintModel.addElement("CSS selector: a[href=\"" + href + "\"]");
-            hintModel.addElement("Firefox Inspector text: href=\"" + href + "\"");
+            hintModel.addElement("Inspector text: href=\"" + href + "\"");
         }
 
         // Always provide a “findable” snippet
@@ -414,12 +447,25 @@ public class ClientSideEyeTab extends JPanel {
         JTextArea ta = new JTextArea();
         ta.setEditable(false);
         ta.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        String revealSelector = bestSelector.isBlank() ? "<selector>" : bestSelector;
         ta.setText(
-                "DevTools usage (Firefox/Chrome):\n" +
+                "DevTools usage (Chrome/Firefox):\n" +
                         "1) Open the page in your browser\n" +
                         "2) Use ONE Find Hint:\n" +
-                        "   - Firefox easiest: paste a Console hint in DevTools Console\n" +
-                        "   - Or in Inspector markup panel, Cmd/Ctrl+F and use the Firefox text hints\n\n" +
+                        "   - Console: paste the Console hint to jump to the element\n" +
+                        "   - Elements/Inspector: Cmd/Ctrl+F and paste the selector or text hint\n\n" +
+                        "Reveal/unhide snippet (Console):\n" +
+                        "const el = document.querySelector('" + revealSelector + "');\n" +
+                        "if (el) {\n" +
+                        "  el.hidden = false;\n" +
+                        "  el.removeAttribute('hidden');\n" +
+                        "  el.style.display = '';\n" +
+                        "  el.style.visibility = 'visible';\n" +
+                        "  el.style.opacity = '1';\n" +
+                        "  el.removeAttribute('aria-hidden');\n" +
+                        "  if ('disabled' in el) el.disabled = false;\n" +
+                        "  el.scrollIntoView({block:'center'});\n" +
+                        "}\n\n" +
                         "Evidence snippet:\n" + evidence + "\n"
         );
         ta.setCaretPosition(0);
@@ -469,6 +515,20 @@ public class ClientSideEyeTab extends JPanel {
         return s;
     }
 
+    private static String bestCssSelector(String id, String name, String href, String src, String action) {
+        if (id != null && !id.isBlank()) return "#" + cssEscape(id);
+        if (name != null && !name.isBlank()) return "[name=\"" + cssEscape(name) + "\"]";
+        if (href != null && !href.isBlank()) return "a[href=\"" + cssEscape(href) + "\"]";
+        if (src != null && !src.isBlank()) return "[src=\"" + cssEscape(src) + "\"]";
+        if (action != null && !action.isBlank()) return "form[action=\"" + cssEscape(action) + "\"]";
+        return "";
+    }
+
+    private static String cssEscape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
     private static int severityRank(String s) {
         if (s == null) return 0;
         return switch (s) {
@@ -499,6 +559,15 @@ public class ClientSideEyeTab extends JPanel {
 
     private boolean isFalsePositive(Finding f) {
         return f != null && falsePositiveKeys.contains(f.stableKey());
+    }
+
+    private Set<String> selectedTypes() {
+        Set<String> types = new HashSet<>();
+        if (filterTypePassword.isSelected()) types.add(FindingType.PASSWORD_VALUE_IN_DOM.name());
+        if (filterTypeHidden.isSelected()) types.add(FindingType.HIDDEN_OR_DISABLED_CONTROL.name());
+        if (filterTypeRole.isSelected()) types.add(FindingType.ROLE_PERMISSION_HINT.name());
+        if (filterTypeInline.isSelected()) types.add(FindingType.INLINE_SCRIPT_SECRETISH.name());
+        return types;
     }
 
     // -------------------------
