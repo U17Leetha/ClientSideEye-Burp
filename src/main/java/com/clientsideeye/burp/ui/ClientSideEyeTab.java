@@ -428,6 +428,26 @@ public class ClientSideEyeTab extends JPanel {
             api.logging().logToOutput("[ClientSideEye] Copied find hint to clipboard: " + hint);
         });
 
+        String revealSelector = bestSelector.isBlank() ? "<selector>" : bestSelector;
+        String revealSnippet =
+                "const el = document.querySelector('" + revealSelector + "');\n" +
+                        "if (el) {\n" +
+                        "  el.hidden = false;\n" +
+                        "  el.removeAttribute('hidden');\n" +
+                        "  el.style.display = '';\n" +
+                        "  el.style.visibility = 'visible';\n" +
+                        "  el.style.opacity = '1';\n" +
+                        "  el.removeAttribute('aria-hidden');\n" +
+                        "  if ('disabled' in el) el.disabled = false;\n" +
+                        "  el.scrollIntoView({block:'center'});\n" +
+                        "}\n";
+
+        JButton copyRevealBtn = new JButton("Copy Reveal Snippet");
+        copyRevealBtn.addActionListener(e -> {
+            copyToClipboard(revealSnippet);
+            api.logging().logToOutput("[ClientSideEye] Copied reveal snippet to clipboard.");
+        });
+
         c.gridx = 0; c.gridy = 0; c.weightx = 0;
         top.add(new JLabel("URL:"), c);
         c.gridx = 1; c.gridy = 0; c.weightx = 1;
@@ -442,12 +462,18 @@ public class ClientSideEyeTab extends JPanel {
         c.gridx = 2; c.gridy = 1; c.weightx = 0;
         top.add(copyHintBtn, c);
 
+        c.gridx = 0; c.gridy = 2; c.weightx = 0;
+        top.add(new JLabel("Reveal snippet:"), c);
+        c.gridx = 1; c.gridy = 2; c.weightx = 1;
+        top.add(new JLabel("Use Console in Chrome/Firefox"), c);
+        c.gridx = 2; c.gridy = 2; c.weightx = 0;
+        top.add(copyRevealBtn, c);
+
         dialog.add(top, BorderLayout.NORTH);
 
         JTextArea ta = new JTextArea();
         ta.setEditable(false);
         ta.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        String revealSelector = bestSelector.isBlank() ? "<selector>" : bestSelector;
         ta.setText(
                 "DevTools usage (Chrome/Firefox):\n" +
                         "1) Open the page in your browser\n" +
@@ -455,17 +481,7 @@ public class ClientSideEyeTab extends JPanel {
                         "   - Console: paste the Console hint to jump to the element\n" +
                         "   - Elements/Inspector: Cmd/Ctrl+F and paste the selector or text hint\n\n" +
                         "Reveal/unhide snippet (Console):\n" +
-                        "const el = document.querySelector('" + revealSelector + "');\n" +
-                        "if (el) {\n" +
-                        "  el.hidden = false;\n" +
-                        "  el.removeAttribute('hidden');\n" +
-                        "  el.style.display = '';\n" +
-                        "  el.style.visibility = 'visible';\n" +
-                        "  el.style.opacity = '1';\n" +
-                        "  el.removeAttribute('aria-hidden');\n" +
-                        "  if ('disabled' in el) el.disabled = false;\n" +
-                        "  el.scrollIntoView({block:'center'});\n" +
-                        "}\n\n" +
+                        revealSnippet + "\n" +
                         "Evidence snippet:\n" + evidence + "\n"
         );
         ta.setCaretPosition(0);
