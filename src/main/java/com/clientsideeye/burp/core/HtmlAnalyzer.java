@@ -42,17 +42,21 @@ public final class HtmlAnalyzer {
         String host = hostFromUrl(url);
 
         // 1) Password value in DOM (high risk)
-        // Match: <input ... type="password" ... value="SOMETHING">
-        Pattern pw = Pattern.compile(
-                "(?is)<input\\b[^>]*\\btype\\s*=\\s*([\"'])password\\1[^>]*\\bvalue\\s*=\\s*([\"'])(.*?)\\2[^>]*>"
-        );
-        Matcher mPw = pw.matcher(html);
-        while (mPw.find()) {
-            String snippet = shrink(mPw.group(0), 400);
+        // Match: any <input> with type="password" and a value attribute (order-agnostic)
+        Pattern inputTag = Pattern.compile("(?is)<input\\b([^>]*)>");
+        Matcher mInput = inputTag.matcher(html);
+        while (mInput.find()) {
+            String attrs = mInput.group(1) == null ? "" : mInput.group(1);
+            String type = extractAttr(attrs, "type").toLowerCase(Locale.ROOT);
+            if (!"password".equals(type)) continue;
+            if (!hasAttrWithValue(attrs, "value")) continue;
+
+            String snippet = shrink(mInput.group(0), 400);
 
             // Confidence: very high if value is non-empty and not just placeholder-ish
             int conf = 95;
-            String val = mPw.group(3) == null ? "" : mPw.group(3).trim();
+            String val = extractAttr(attrs, "value");
+            val = val == null ? "" : val.trim();
             if (val.isEmpty()) conf = 70;
             if (val.equalsIgnoreCase("password") || val.equalsIgnoreCase("********")) conf = 75;
 
@@ -72,7 +76,7 @@ public final class HtmlAnalyzer {
         // 2) Hidden/disabled controls (elevate only if likely state-changing)
         // We look for common interactive elements that are hidden/disabled via attributes or inline styles.
         Pattern control = Pattern.compile(
-                "(?is)<(button|a|input)\\b([^>]*)>"
+                "(?is)<(button|a|input|select|textarea|form|div|span)\\b([^>]*)>"
         );
         Matcher mCtl = control.matcher(html);
 
@@ -152,24 +156,37 @@ public final class HtmlAnalyzer {
         // 4) Inline script “secret-ish” strings (low confidence by default)
         Pattern inlineScript = Pattern.compile("(?is)<script\\b[^>]*>(.*?)</script>");
         Matcher mJs = inlineScript.matcher(html);
-        int secretishCount = 0;
-        while (mJs.find() && secretishCount < 3) {
+        List<ScriptCandidate> secretishCandidates = new ArrayList<>();
+        List<ScriptCandidate> devtoolsCandidates = new ArrayList<>();
+        while (mJs.find()) {
             String body = mJs.group(1);
             if (body == null) continue;
             if (looksSecretish(body)) {
-                secretishCount++;
-                out.add(new Finding(
-                        FindingType.INLINE_SCRIPT_SECRETISH.name(),
-                        Severity.LOW,
-                        30,
-                        url,
-                        host,
-                        "Potential secret-like value in inline script",
-                        "The page contains inline script content that looks like it may include credentials/tokens/keys. This is heuristic and can generate false positives.",
-                        shrink(body, 420),
-                        "Avoid embedding secrets in client-side code. Use server-side sessions or retrieve short-lived tokens from protected endpoints with proper authorization."
-                ));
+                secretishCandidates.add(new ScriptCandidate(30, body));
             }
+
+            DevtoolsSignals d = scoreDevtoolsSignals(body);
+            if (d.confidence >= 40) {
+                devtoolsCandidates.add(new ScriptCandidate(d.confidence, body));
+            }
+        }
+
+        addSecretishFindings(out, secretishCandidates, url, host);
+        addDevtoolsFindings(out, devtoolsCandidates, url, host);
+
+        // 5) DevTools detection hints in HTML (very low confidence)
+        if (devtoolsCandidates.isEmpty() && looksDevtoolsHint(html)) {
+            out.add(new Finding(
+                    FindingType.DEVTOOLS_BLOCKING.name(),
+                    Severity.INFO,
+                    30,
+                    url,
+                    host,
+                    "DevTools-related hint found in HTML",
+                    "The page contains DevTools-related keywords. This may indicate client-side detection or blocking logic elsewhere (e.g., external scripts).",
+                    shrink(html, 240),
+                    "If DevTools access is blocked and testing is authorized, look for client-side detection in scripts and consider a controlled bypass snippet."
+            ));
         }
 
         return out;
@@ -209,10 +226,20 @@ public final class HtmlAnalyzer {
     }
 
     private static String extractAttr(String attrs, String name) {
-        Pattern p = Pattern.compile("(?is)\\b" + Pattern.quote(name) + "\\s*=\\s*([\"'])(.*?)\\1");
+        Pattern p = Pattern.compile("(?is)\\b" + Pattern.quote(name) + "\\s*=\\s*(?:([\"'])(.*?)\\1|([^\\s>]+))");
         Matcher m = p.matcher(attrs);
-        if (m.find()) return m.group(2) == null ? "" : m.group(2).trim();
+        if (m.find()) {
+            String quoted = m.group(2);
+            if (quoted != null) return quoted.trim();
+            String unquoted = m.group(3);
+            return unquoted == null ? "" : unquoted.trim();
+        }
         return "";
+    }
+
+    private static boolean hasAttrWithValue(String attrs, String name) {
+        Pattern p = Pattern.compile("(?is)\\b" + Pattern.quote(name) + "\\s*=");
+        return p.matcher(attrs).find();
     }
 
     private static class ControlSignals {
@@ -267,6 +294,10 @@ public final class HtmlAnalyzer {
         if (lower.contains("role=\"button\"") || lower.contains("role='button'")) {
             action += 10;
             s.reasons.add("role=button");
+        }
+        if (hasAttrWithValue(attrs, "tabindex")) {
+            action += 5;
+            s.reasons.add("tabindex");
         }
 
         // Privileged keyword boost (narrowed to specific attrs)
@@ -326,5 +357,92 @@ public final class HtmlAnalyzer {
         // long base64-ish / hex-ish strings
         Pattern longToken = Pattern.compile("(?i)\\b([a-z0-9+/]{30,}={0,2}|[a-f0-9]{32,})\\b");
         return longToken.matcher(s).find();
+    }
+
+    private static class ScriptCandidate {
+        final int confidence;
+        final String body;
+
+        ScriptCandidate(int confidence, String body) {
+            this.confidence = confidence;
+            this.body = body == null ? "" : body;
+        }
+    }
+
+    private static void addSecretishFindings(List<Finding> out, List<ScriptCandidate> candidates, String url, String host) {
+        if (candidates == null || candidates.isEmpty()) return;
+        Set<String> seen = new HashSet<>();
+        for (ScriptCandidate c : candidates) {
+            String snippet = shrink(c.body, 420);
+            if (!seen.add(snippet)) continue;
+            out.add(new Finding(
+                    FindingType.INLINE_SCRIPT_SECRETISH.name(),
+                    Severity.LOW,
+                    30,
+                    url,
+                    host,
+                    "Potential secret-like value in inline script",
+                    "The page contains inline script content that looks like it may include credentials/tokens/keys. This is heuristic and can generate false positives.",
+                    snippet,
+                    "Avoid embedding secrets in client-side code. Use server-side sessions or retrieve short-lived tokens from protected endpoints with proper authorization."
+            ));
+        }
+    }
+
+    private static void addDevtoolsFindings(List<Finding> out, List<ScriptCandidate> candidates, String url, String host) {
+        if (candidates == null || candidates.isEmpty()) return;
+        candidates.sort((a, b) -> Integer.compare(b.confidence, a.confidence));
+        Set<String> seen = new HashSet<>();
+        for (ScriptCandidate c : candidates) {
+            String snippet = shrink(c.body, 420);
+            if (!seen.add(snippet)) continue;
+            Severity sev = c.confidence >= 65 ? Severity.MEDIUM : Severity.LOW;
+            out.add(new Finding(
+                    FindingType.DEVTOOLS_BLOCKING.name(),
+                    sev,
+                    c.confidence,
+                    url,
+                    host,
+                    "Possible DevTools blocking or detection logic in client-side script",
+                    "The page includes script patterns commonly used to detect or disrupt DevTools usage (e.g., debugger statements, window size checks, or devtools keywords). This can interfere with client-side enumeration and validation.",
+                    snippet,
+                    "If this behavior is authorized to bypass, use a controlled DevTools bypass snippet to neutralize common detection hooks. Ensure testing remains in-scope and approved."
+            ));
+        }
+    }
+
+    private static class DevtoolsSignals {
+        int confidence;
+    }
+
+    private static DevtoolsSignals scoreDevtoolsSignals(String scriptBody) {
+        DevtoolsSignals d = new DevtoolsSignals();
+        int score = 0;
+        String s = scriptBody == null ? "" : scriptBody;
+        String lower = s.toLowerCase(Locale.ROOT);
+
+        if (lower.contains("devtools") || lower.contains("dev tool") || lower.contains("developer tools")) score += 30;
+        if (lower.contains("devtools-opened") || lower.contains("devtoolsopened")) score += 30;
+        if (lower.contains("outerwidth") && lower.contains("innerwidth")) score += 25;
+        if (lower.contains("outerheight") && lower.contains("innerheight")) score += 20;
+        if (lower.contains("outerwidth-innerwidth") || lower.contains("outerwidth - innerwidth")) score += 15;
+        if (lower.contains("outerheight-innerheight") || lower.contains("outerheight - innerheight")) score += 15;
+        if (lower.contains("debugger")) score += 20;
+        if (lower.contains("setinterval") || lower.contains("settimeout")) score += 12;
+        if (lower.contains("requestanimationframe")) score += 8;
+        if (lower.contains("resize") && lower.contains("addEventListener")) score += 10;
+        if (lower.contains("console.clear") || lower.contains("console.log") || lower.contains("console.profile")) score += 10;
+        if (lower.contains("tostring") && lower.contains("function")) score += 10;
+        if (lower.contains("performance.now") || lower.contains("date.now")) score += 8;
+        if (lower.contains("chrome") && lower.contains("devtools")) score += 10;
+
+        d.confidence = Math.max(0, Math.min(100, score));
+        return d;
+    }
+
+    private static boolean looksDevtoolsHint(String html) {
+        if (html == null) return false;
+        String lower = html.toLowerCase(Locale.ROOT);
+        return lower.contains("devtools") || lower.contains("dev tool") || lower.contains("developer tools");
     }
 }

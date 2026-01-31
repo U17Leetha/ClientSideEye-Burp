@@ -9,6 +9,7 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 - Scores findings by severity and confidence
 - Highlights high-risk issues in the UI
 - Provides browser-friendly “find hints” for rapid validation
+- Detects common DevTools blocking/detection logic and provides a bypass snippet
 - Exports findings as JSON
 - Analyzes in-scope Site Map traffic
 
@@ -30,6 +31,7 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 1. Build the extension:
    ```bash
    gradle clean jar
+   ```
 
 ## Usage
 
@@ -42,7 +44,7 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 4. Triage findings by Severity and Confidence
 <img width="1501" height="855" alt="image" src="https://github.com/user-attachments/assets/e3b67ed3-7893-4cf0-84a0-a0c50a0b4a99" />
 
-6. Use View in Browser to validate findings
+5. Use View in Browser to validate findings
 <img width="901" height="553" alt="image" src="https://github.com/user-attachments/assets/8ecc53e8-7bb3-4c67-b7cb-1c46e8870c54" />
 ### Validating Findings in the Browser
 
@@ -69,8 +71,13 @@ The Inspector will jump directly to the relevant element, allowing you to:
 - ROLE_PERMISSION_HINT
 
 - INLINE_SCRIPT_SECRETISH
+- DEVTOOLS_BLOCKING
 
 ## Non-goals
 
 ClientSideEye does not exploit vulnerabilities or bypass authorization.
 It highlights client-side anti-patterns for manual validation.
+
+## Change Tracking
+
+See `CHANGELOG.md` for changes, improvements, and feature requests.

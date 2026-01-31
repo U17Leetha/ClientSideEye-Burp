@@ -18,8 +18,6 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.clientsideeye.burp.core.Finding.Severity;
@@ -46,6 +44,7 @@ public class ClientSideEyeTab extends JPanel {
     private final JCheckBoxMenuItem filterTypeHidden = new JCheckBoxMenuItem(FindingType.HIDDEN_OR_DISABLED_CONTROL.name(), true);
     private final JCheckBoxMenuItem filterTypeRole = new JCheckBoxMenuItem(FindingType.ROLE_PERMISSION_HINT.name(), true);
     private final JCheckBoxMenuItem filterTypeInline = new JCheckBoxMenuItem(FindingType.INLINE_SCRIPT_SECRETISH.name(), true);
+    private final JCheckBoxMenuItem filterTypeDevtools = new JCheckBoxMenuItem(FindingType.DEVTOOLS_BLOCKING.name(), true);
     private final JPopupMenu typeMenu = new JPopupMenu();
     private final JButton typeMenuButton = new JButton("Type…");
 
@@ -83,6 +82,7 @@ public class ClientSideEyeTab extends JPanel {
         typeMenu.add(filterTypeHidden);
         typeMenu.add(filterTypeRole);
         typeMenu.add(filterTypeInline);
+        typeMenu.add(filterTypeDevtools);
         typeMenuButton.addActionListener(e ->
                 typeMenu.show(typeMenuButton, 0, typeMenuButton.getHeight()));
 
@@ -157,6 +157,7 @@ public class ClientSideEyeTab extends JPanel {
             filterTypeHidden.setSelected(true);
             filterTypeRole.setSelected(true);
             filterTypeInline.setSelected(true);
+            filterTypeDevtools.setSelected(true);
             filterHigh.setSelected(true);
             filterMedium.setSelected(true);
             filterLow.setSelected(true);
@@ -184,6 +185,7 @@ public class ClientSideEyeTab extends JPanel {
         filterTypeHidden.addActionListener(e -> refreshTable());
         filterTypeRole.addActionListener(e -> refreshTable());
         filterTypeInline.addActionListener(e -> refreshTable());
+        filterTypeDevtools.addActionListener(e -> refreshTable());
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
@@ -360,43 +362,10 @@ public class ClientSideEyeTab extends JPanel {
         String url = f.url();
         String evidence = f.evidence();
 
-        String id = extractAttr(evidence, "id");
-        String name = extractAttr(evidence, "name");
-        String href = extractAttr(evidence, "href");
-        String src = extractAttr(evidence, "src");
-        String action = extractAttr(evidence, "action");
-        String bestSelector = bestCssSelector(id, name, href, src, action);
-
+        boolean isDevtoolsFinding = FindingType.DEVTOOLS_BLOCKING.name().equals(f.type());
+        FindHintBuilder.Result hintResult = FindHintBuilder.build(evidence);
         DefaultComboBoxModel<String> hintModel = new DefaultComboBoxModel<>();
-
-        if (!bestSelector.isBlank()) {
-            hintModel.addElement("Console (Chrome/Firefox): inspect(document.querySelector('" + bestSelector + "'))");
-            hintModel.addElement("Console (Chrome/Firefox): document.querySelector('" + bestSelector + "')?.scrollIntoView({block:'center'})");
-            hintModel.addElement("Elements/Inspector search (Chrome/Firefox): " + bestSelector);
-        }
-
-        if (!id.isBlank()) {
-            hintModel.addElement("Inspector text: id=\"" + id + "\"");
-        }
-
-        if (!name.isBlank()) {
-            hintModel.addElement("Inspector text: name=\"" + name + "\"");
-        }
-
-        if (!href.isBlank()) {
-            hintModel.addElement("Inspector text: href=\"" + href + "\"");
-        }
-
-        // Always provide a “findable” snippet
-        String findTerm = bestEvidenceSearchTerm(evidence);
-        if (!findTerm.isBlank()) {
-            hintModel.addElement("Search term (markup): " + findTerm);
-        }
-
-        if (hintModel.getSize() == 0) {
-            hintModel.addElement("Search term (markup): " + (evidence == null ? "" : evidence.replaceAll("\\s+", " ").trim()));
-        }
-
+        for (String hint : hintResult.hints) hintModel.addElement(hint);
         JComboBox<String> hintCombo = new JComboBox<>(hintModel);
 
         JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "View in Browser", Dialog.ModalityType.APPLICATION_MODAL);
@@ -428,24 +397,18 @@ public class ClientSideEyeTab extends JPanel {
             api.logging().logToOutput("[ClientSideEye] Copied find hint to clipboard: " + hint);
         });
 
-        String revealSelector = bestSelector.isBlank() ? "<selector>" : bestSelector;
-        String revealSnippet =
-                "const el = document.querySelector('" + revealSelector + "');\n" +
-                        "if (el) {\n" +
-                        "  el.hidden = false;\n" +
-                        "  el.removeAttribute('hidden');\n" +
-                        "  el.style.display = '';\n" +
-                        "  el.style.visibility = 'visible';\n" +
-                        "  el.style.opacity = '1';\n" +
-                        "  el.removeAttribute('aria-hidden');\n" +
-                        "  if ('disabled' in el) el.disabled = false;\n" +
-                        "  el.scrollIntoView({block:'center'});\n" +
-                        "}\n";
+        String revealSnippet = hintResult.revealSnippet;
 
         JButton copyRevealBtn = new JButton("Copy Reveal Snippet");
         copyRevealBtn.addActionListener(e -> {
             copyToClipboard(revealSnippet);
             api.logging().logToOutput("[ClientSideEye] Copied reveal snippet to clipboard.");
+        });
+
+        JButton copyBypassBtn = new JButton("Copy DevTools Bypass Snippet");
+        copyBypassBtn.addActionListener(e -> {
+            copyToClipboard(devtoolsBypassSnippet());
+            api.logging().logToOutput("[ClientSideEye] Copied DevTools bypass snippet to clipboard.");
         });
 
         c.gridx = 0; c.gridy = 0; c.weightx = 0;
@@ -469,11 +432,23 @@ public class ClientSideEyeTab extends JPanel {
         c.gridx = 2; c.gridy = 2; c.weightx = 0;
         top.add(copyRevealBtn, c);
 
+        if (isDevtoolsFinding) {
+            c.gridx = 0; c.gridy = 3; c.weightx = 0;
+            top.add(new JLabel("Bypass snippet:"), c);
+            c.gridx = 1; c.gridy = 3; c.weightx = 1;
+            top.add(new JLabel("Use Console in Chrome/Firefox"), c);
+            c.gridx = 2; c.gridy = 3; c.weightx = 0;
+            top.add(copyBypassBtn, c);
+        }
+
         dialog.add(top, BorderLayout.NORTH);
 
         JTextArea ta = new JTextArea();
         ta.setEditable(false);
         ta.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        String bypassSection = isDevtoolsFinding
+                ? ("DevTools bypass snippet (Console):\n" + devtoolsBypassSnippet() + "\n")
+                : "";
         ta.setText(
                 "DevTools usage (Chrome/Firefox):\n" +
                         "1) Open the page in your browser\n" +
@@ -482,6 +457,7 @@ public class ClientSideEyeTab extends JPanel {
                         "   - Elements/Inspector: Cmd/Ctrl+F and paste the selector or text hint\n\n" +
                         "Reveal/unhide snippet (Console):\n" +
                         revealSnippet + "\n" +
+                        bypassSection +
                         "Evidence snippet:\n" + evidence + "\n"
         );
         ta.setCaretPosition(0);
@@ -507,42 +483,31 @@ public class ClientSideEyeTab extends JPanel {
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(s == null ? "" : s), null);
     }
 
-    private static String extractAttr(String text, String attr) {
-        if (text == null) return "";
-        Pattern p = Pattern.compile("(?i)\\b" + Pattern.quote(attr) + "\\s*=\\s*([\"'])(.*?)\\1");
-        Matcher m = p.matcher(text);
-        if (m.find()) return m.group(2);
-        return "";
-    }
-
-    private static String bestEvidenceSearchTerm(String evidence) {
-        if (evidence == null) return "";
-        String href = extractAttr(evidence, "href");
-        if (!href.isBlank()) return "href=\"" + href + "\"";
-
-        String src = extractAttr(evidence, "src");
-        if (!src.isBlank()) return "src=\"" + src + "\"";
-
-        String action = extractAttr(evidence, "action");
-        if (!action.isBlank()) return "action=\"" + action + "\"";
-
-        String s = evidence.replaceAll("\\s+", " ").trim();
-        if (s.length() > 80) s = s.substring(0, 80);
-        return s;
-    }
-
-    private static String bestCssSelector(String id, String name, String href, String src, String action) {
-        if (id != null && !id.isBlank()) return "#" + cssEscape(id);
-        if (name != null && !name.isBlank()) return "[name=\"" + cssEscape(name) + "\"]";
-        if (href != null && !href.isBlank()) return "a[href=\"" + cssEscape(href) + "\"]";
-        if (src != null && !src.isBlank()) return "[src=\"" + cssEscape(src) + "\"]";
-        if (action != null && !action.isBlank()) return "form[action=\"" + cssEscape(action) + "\"]";
-        return "";
-    }
-
-    private static String cssEscape(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    private static String devtoolsBypassSnippet() {
+        return ""
+                + "(function(){\n"
+                + "  const hasDebugger = (fn) => {\n"
+                + "    try {\n"
+                + "      if (typeof fn === 'string') return fn.includes('debugger');\n"
+                + "      if (typeof fn === 'function') return /debugger/.test(Function.prototype.toString.call(fn));\n"
+                + "    } catch (e) {}\n"
+                + "    return false;\n"
+                + "  };\n"
+                + "  const _setInterval = window.setInterval;\n"
+                + "  const _setTimeout = window.setTimeout;\n"
+                + "  window.setInterval = function(fn, t, ...args){\n"
+                + "    if (hasDebugger(fn)) return 0;\n"
+                + "    return _setInterval.call(this, fn, t, ...args);\n"
+                + "  };\n"
+                + "  window.setTimeout = function(fn, t, ...args){\n"
+                + "    if (hasDebugger(fn)) return 0;\n"
+                + "    return _setTimeout.call(this, fn, t, ...args);\n"
+                + "  };\n"
+                + "  try { console.clear = function(){}; } catch (e) {}\n"
+                + "  try { Object.defineProperty(window,'outerWidth',{get(){return window.innerWidth;}}); } catch (e) {}\n"
+                + "  try { Object.defineProperty(window,'outerHeight',{get(){return window.innerHeight;}}); } catch (e) {}\n"
+                + "  try { window.__clientsideeye_devtools_bypass = true; } catch (e) {}\n"
+                + "})();\n";
     }
 
     private static int severityRank(String s) {
@@ -583,6 +548,7 @@ public class ClientSideEyeTab extends JPanel {
         if (filterTypeHidden.isSelected()) types.add(FindingType.HIDDEN_OR_DISABLED_CONTROL.name());
         if (filterTypeRole.isSelected()) types.add(FindingType.ROLE_PERMISSION_HINT.name());
         if (filterTypeInline.isSelected()) types.add(FindingType.INLINE_SCRIPT_SECRETISH.name());
+        if (filterTypeDevtools.isSelected()) types.add(FindingType.DEVTOOLS_BLOCKING.name());
         return types;
     }
 

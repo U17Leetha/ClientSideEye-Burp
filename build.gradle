@@ -12,6 +12,7 @@ repositories {
 dependencies {
     // BApp-friendly: compile against public Montoya API (Burp provides it at runtime)
     compileOnly "net.portswigger.burp.extensions:montoya-api:2025.12"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
 }
 
 java {
@@ -22,6 +23,10 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 jar {
