@@ -423,10 +423,17 @@ public final class HtmlAnalyzer {
 
         if (lower.contains("devtools") || lower.contains("dev tool") || lower.contains("developer tools")) score += 30;
         if (lower.contains("devtools-opened") || lower.contains("devtoolsopened")) score += 30;
+        if (lower.contains("isdevtoolsopen") || lower.contains("devtoolsopen")) score += 20;
+        if (lower.contains("disabletransformwhendevtoolsopen")) score += 25;
         if (lower.contains("outerwidth") && lower.contains("innerwidth")) score += 25;
         if (lower.contains("outerheight") && lower.contains("innerheight")) score += 20;
         if (lower.contains("outerwidth-innerwidth") || lower.contains("outerwidth - innerwidth")) score += 15;
         if (lower.contains("outerheight-innerheight") || lower.contains("outerheight - innerheight")) score += 15;
+        if (lower.contains("outerwidth") && lower.contains("innerwidth") && lower.contains("math.abs")) score += 10;
+        if ((lower.contains("outerwidth") && lower.contains("innerwidth") && lower.contains("160"))
+                || (lower.contains("outerheight") && lower.contains("innerheight") && lower.contains("160"))) {
+            score += 10;
+        }
         if (lower.contains("debugger")) score += 20;
         if (lower.contains("setinterval") || lower.contains("settimeout")) score += 12;
         if (lower.contains("requestanimationframe")) score += 8;
