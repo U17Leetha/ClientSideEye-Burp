@@ -447,7 +447,8 @@ public class ClientSideEyeTab extends JPanel {
         ta.setEditable(false);
         ta.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         String bypassSection = isDevtoolsFinding
-                ? ("DevTools bypass snippet (Console):\n" + devtoolsBypassSnippet() + "\n")
+                ? ("DevTools bypass snippet (Console):\n" + devtoolsBypassSnippet() + "\n"
+                + "Tip: If the app blocks on load, run the snippet as a DevTools Snippet and reload.\n")
                 : "";
         ta.setText(
                 "DevTools usage (Chrome/Firefox):\n" +
@@ -493,19 +494,41 @@ public class ClientSideEyeTab extends JPanel {
                 + "    } catch (e) {}\n"
                 + "    return false;\n"
                 + "  };\n"
-                + "  const _setInterval = window.setInterval;\n"
-                + "  const _setTimeout = window.setTimeout;\n"
-                + "  window.setInterval = function(fn, t, ...args){\n"
-                + "    if (hasDebugger(fn)) return 0;\n"
-                + "    return _setInterval.call(this, fn, t, ...args);\n"
+                + "  const stripDebugger = (code) => typeof code === 'string' ? code.replace(/\\bdebugger\\b/g,'') : code;\n"
+                + "  const wrapFn = (fn) => {\n"
+                + "    if (typeof fn !== 'function') return fn;\n"
+                + "    try {\n"
+                + "      const src = Function.prototype.toString.call(fn);\n"
+                + "      if (/\\bdebugger\\b/.test(src)) return function(){};\n"
+                + "    } catch (e) {}\n"
+                + "    return fn;\n"
                 + "  };\n"
-                + "  window.setTimeout = function(fn, t, ...args){\n"
-                + "    if (hasDebugger(fn)) return 0;\n"
-                + "    return _setTimeout.call(this, fn, t, ...args);\n"
+                + "  const patchTimer = (name) => {\n"
+                + "    const orig = window[name];\n"
+                + "    window[name] = function(fn, t, ...args){\n"
+                + "      if (typeof fn === 'string') fn = stripDebugger(fn);\n"
+                + "      else fn = wrapFn(fn);\n"
+                + "      if (hasDebugger(fn)) return 0;\n"
+                + "      return orig.call(this, fn, t, ...args);\n"
+                + "    };\n"
                 + "  };\n"
+                + "  patchTimer('setInterval');\n"
+                + "  patchTimer('setTimeout');\n"
+                + "  try { window.eval = (orig => function(code){ return orig.call(this, stripDebugger(code)); })(window.eval); } catch (e) {}\n"
+                + "  try {\n"
+                + "    const OrigFunction = Function;\n"
+                + "    window.Function = function(...args){\n"
+                + "      if (args.length) args[args.length-1] = stripDebugger(args[args.length-1]);\n"
+                + "      return OrigFunction.apply(this, args);\n"
+                + "    };\n"
+                + "    window.Function.prototype = OrigFunction.prototype;\n"
+                + "  } catch (e) {}\n"
                 + "  try { console.clear = function(){}; } catch (e) {}\n"
+                + "  try { console.profile = function(){}; } catch (e) {}\n"
                 + "  try { Object.defineProperty(window,'outerWidth',{get(){return window.innerWidth;}}); } catch (e) {}\n"
                 + "  try { Object.defineProperty(window,'outerHeight',{get(){return window.innerHeight;}}); } catch (e) {}\n"
+                + "  try { Object.defineProperty(window,'devtools',{get(){return {isOpen:false,orientation:undefined}}}); } catch (e) {}\n"
+                + "  try { Object.defineProperty(window,'__REACT_DEVTOOLS_GLOBAL_HOOK__',{get(){return {isDisabled:true}}}); } catch (e) {}\n"
                 + "  try { window.__clientsideeye_devtools_bypass = true; } catch (e) {}\n"
                 + "})();\n";
     }
