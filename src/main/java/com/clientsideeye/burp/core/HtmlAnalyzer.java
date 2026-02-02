@@ -75,10 +75,12 @@ public final class HtmlAnalyzer {
 
         // 2) Hidden/disabled controls (elevate only if likely state-changing)
         // We look for common interactive elements that are hidden/disabled via attributes or inline styles.
+        // Strip script/style content to avoid false positives from inline JS/CSS.
+        String scanHtml = stripScriptsAndStyles(html);
         Pattern control = Pattern.compile(
                 "(?is)<(button|a|input|select|textarea|form|div|span)\\b([^>]*)>"
         );
-        Matcher mCtl = control.matcher(html);
+        Matcher mCtl = control.matcher(scanHtml);
 
         while (mCtl.find()) {
             String tag = mCtl.group(1).toLowerCase(Locale.ROOT);
@@ -100,6 +102,9 @@ public final class HtmlAnalyzer {
             }
 
             ControlSignals s = scoreControlSignals(tag, attrs, full);
+            if (!s.actionable && ("div".equals(tag) || "span".equals(tag))) {
+                continue; // reduce noise from non-actionable containers
+            }
             String why = s.reasons.isEmpty() ? "" : ("Signals: " + String.join(", ", s.reasons) + ".");
             String state = (isHidden ? "hidden" : "") + (isHidden && isDisabled ? " & " : "") + (isDisabled ? "disabled" : "");
 
@@ -137,9 +142,12 @@ public final class HtmlAnalyzer {
         }
 
         // 3) Role/permission hints (mostly informational, sometimes useful)
-        Pattern roleHint = Pattern.compile("(?is)\\b(role|permission|authorize|isadmin|is_admin|acl|rbac|privilege)\\b");
-        Matcher mRole = roleHint.matcher(html);
+        Pattern roleHint = Pattern.compile(
+                "(?is)\\b(permission|authorize|isadmin|is_admin|acl|rbac|privilege)\\b|\\brole\\s*[:=]\\s*['\"]?(admin|superuser|owner|manager|privileged|staff)\\b"
+        );
+        Matcher mRole = roleHint.matcher(scanHtml);
         if (mRole.find()) {
+            String matched = mRole.group(1) != null ? mRole.group(1) : mRole.group(2);
             out.add(new Finding(
                     FindingType.ROLE_PERMISSION_HINT.name(),
                     Severity.INFO,
@@ -148,7 +156,7 @@ public final class HtmlAnalyzer {
                     host,
                     "Role/permission hints found in HTML/JS",
                     "The page contains role/permission-related keywords. This may help locate authorization logic or UI gating, but is not necessarily a vulnerability on its own.",
-                    "Matched keyword: " + mRole.group(1),
+                    "Matched keyword: " + matched,
                     "Confirm all authorization decisions are enforced server-side. Avoid leaking internal role names or authorization flags to the client unless required."
             ));
         }
@@ -194,26 +202,18 @@ public final class HtmlAnalyzer {
 
     private static boolean hasHiddenSignal(String attrs, String fullTag) {
         String a = (attrs + " " + fullTag).toLowerCase(Locale.ROOT);
-        return a.contains(" hidden")
-                || a.contains("\thidden")
-                || a.contains("hidden=")
-                || a.matches(".*\\bhidden\\b.*")
-                || a.contains("aria-hidden=\"true\"")
-                || a.contains("aria-hidden='true'")
+        if (hasA11yHiddenClass(a)) {
+            // If it is only a11y-hidden (sr-only/visually-hidden), do not flag as hidden.
+            if (!hasVisualHiddenSignal(a) && !hasHiddenAttribute(a)) return false;
+        }
+
+        return hasHiddenAttribute(a)
+                || hasVisualHiddenSignal(a)
                 || a.contains("class=\"hidden\"")
                 || a.contains("class='hidden'")
+                || a.contains("class=hidden")
                 || a.contains("class=\"d-none\"")
-                || a.contains("class='d-none'")
-                || a.contains("class=\"sr-only\"")
-                || a.contains("class='sr-only'")
-                || a.contains("class=\"visually-hidden\"")
-                || a.contains("class='visually-hidden'")
-                || a.contains("display:none")
-                || a.contains("display: none")
-                || a.contains("visibility:hidden")
-                || a.contains("visibility: hidden")
-                || a.contains("opacity:0")
-                || a.contains("opacity: 0");
+                || a.contains("class='d-none'");
     }
 
     private static boolean hasDisabledSignal(String attrs, String fullTag) {
@@ -223,6 +223,27 @@ public final class HtmlAnalyzer {
                 || a.contains("disabled=")
                 || a.contains("aria-disabled=\"true\"")
                 || a.contains("aria-disabled='true'");
+    }
+
+    private static boolean hasHiddenAttribute(String lowerAttrs) {
+        return lowerAttrs.contains(" hidden")
+                || lowerAttrs.contains("\thidden")
+                || lowerAttrs.contains("hidden=");
+    }
+
+    private static boolean hasVisualHiddenSignal(String lowerAttrs) {
+        return lowerAttrs.contains("display:none")
+                || lowerAttrs.contains("display: none")
+                || lowerAttrs.contains("visibility:hidden")
+                || lowerAttrs.contains("visibility: hidden")
+                || lowerAttrs.contains("opacity:0")
+                || lowerAttrs.contains("opacity: 0");
+    }
+
+    private static boolean hasA11yHiddenClass(String lowerAttrs) {
+        return lowerAttrs.contains("sr-only")
+                || lowerAttrs.contains("visually-hidden")
+                || lowerAttrs.contains("visuallyhidden");
     }
 
     private static String extractAttr(String attrs, String name) {
@@ -349,14 +370,22 @@ public final class HtmlAnalyzer {
     private static boolean looksSecretish(String scriptBody) {
         String s = scriptBody;
         if (s == null) return false;
+
         String lower = s.toLowerCase(Locale.ROOT);
+        // Prefer real secret-like assignments with sufficient length
+        Pattern secretAssign = Pattern.compile("(?i)\\b(api[_-]?key|secret|bearer|token)\\b\\s*[:=]\\s*['\\\"][^'\\\"]{20,}['\\\"]");
+        if (secretAssign.matcher(s).find()) return true;
 
-        // very simple heuristics: tokens/keys/pass-like assignments
-        if (lower.contains("apikey") || lower.contains("api_key") || lower.contains("secret") || lower.contains("token") || lower.contains("bearer")) return true;
+        // JWTs or long base64/hex-like strings
+        if (s.contains("eyJ") && s.contains(".")) return true;
+        Pattern tokenNearKeyword = Pattern.compile("(?is)\\b(api[_-]?key|secret|bearer|token|authorization)\\b.{0,80}?([a-z0-9+/]{30,}={0,2}|[a-f0-9]{32,})");
+        return tokenNearKeyword.matcher(s).find();
+    }
 
-        // long base64-ish / hex-ish strings
-        Pattern longToken = Pattern.compile("(?i)\\b([a-z0-9+/]{30,}={0,2}|[a-f0-9]{32,})\\b");
-        return longToken.matcher(s).find();
+    private static String stripScriptsAndStyles(String html) {
+        if (html == null || html.isEmpty()) return "";
+        String withoutScripts = html.replaceAll("(?is)<script\\b[^>]*>.*?</script>", " ");
+        return withoutScripts.replaceAll("(?is)<style\\b[^>]*>.*?</style>", " ");
     }
 
     private static class ScriptCandidate {

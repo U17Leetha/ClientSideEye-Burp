@@ -104,20 +104,16 @@ public class ClientSideEyeTab extends JPanel {
         c.gridx = 6; c.gridy = 0; c.weightx = 0.0;
         controls.add(filterFalsePositive, c);
 
-        JButton btnApply = new JButton("Apply");
-        JButton btnClear = new JButton("Clear");
         JButton btnAnalyzeSiteMap = new JButton("Analyze Site Map (in-scope)");
         JButton btnExport = new JButton("Export JSON…");
         JButton btnView = new JButton("View in Browser…");
         JButton btnPurge = new JButton("Clear Findings");
 
         c.gridx = 7; c.gridy = 0; c.weightx = 0;
-        controls.add(btnApply, c);
-        c.gridx = 8; controls.add(btnClear, c);
-        c.gridx = 9; controls.add(btnAnalyzeSiteMap, c);
-        c.gridx = 10; controls.add(btnExport, c);
-        c.gridx = 11; controls.add(btnView, c);
-        c.gridx = 12; controls.add(btnPurge, c);
+        controls.add(btnAnalyzeSiteMap, c);
+        c.gridx = 8; controls.add(btnExport, c);
+        c.gridx = 9; controls.add(btnView, c);
+        c.gridx = 10; controls.add(btnPurge, c);
 
         add(controls, BorderLayout.NORTH);
 
@@ -150,22 +146,6 @@ public class ClientSideEyeTab extends JPanel {
         ));
 
         // listeners
-        btnApply.addActionListener(e -> refreshTable());
-        btnClear.addActionListener(e -> {
-            filterHost.setText("");
-            filterTypePassword.setSelected(true);
-            filterTypeHidden.setSelected(true);
-            filterTypeRole.setSelected(true);
-            filterTypeInline.setSelected(true);
-            filterTypeDevtools.setSelected(true);
-            filterHigh.setSelected(true);
-            filterMedium.setSelected(true);
-            filterLow.setSelected(true);
-            filterInfo.setSelected(true);
-            filterFalsePositive.setSelected(true);
-            refreshTable();
-        });
-
         btnPurge.addActionListener(e -> {
             findingsByKey.clear();
             falsePositiveKeys.clear();

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class HtmlAnalyzerTest {
 
@@ -26,7 +27,7 @@ class HtmlAnalyzerTest {
 
     @Test
     void detectsRolePermissionHints() {
-        String html = "<script>const role = 'admin';</script>";
+        String html = "<div role=\"admin\">Admin Section</div>";
         List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/app", html);
         assertTrue(findings.stream().anyMatch(f ->
                 f.type().equals(FindingType.ROLE_PERMISSION_HINT.name())));
@@ -37,6 +38,30 @@ class HtmlAnalyzerTest {
         String html = "<script>const apiKey=\"ABCDEF1234567890ABCDEF1234567890\";</script>";
         List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/app", html);
         assertTrue(findings.stream().anyMatch(f ->
+                f.type().equals(FindingType.INLINE_SCRIPT_SECRETISH.name())));
+    }
+
+    @Test
+    void ignoresA11yOnlyHiddenElements() {
+        String html = "<span class=\"sr-only\">Hidden for a11y</span>";
+        List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/app", html);
+        assertFalse(findings.stream().anyMatch(f ->
+                f.type().equals(FindingType.HIDDEN_OR_DISABLED_CONTROL.name())));
+    }
+
+    @Test
+    void ignoresImportMapLikeScriptsForSecretish() {
+        String html = "<script type=\"importmap\">{ \"imports\": { \"rfc4648\": \"/resources/rfc4648.js\" } }</script>";
+        List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/app", html);
+        assertFalse(findings.stream().anyMatch(f ->
+                f.type().equals(FindingType.INLINE_SCRIPT_SECRETISH.name())));
+    }
+
+    @Test
+    void ignoresLongRandomStringsWithoutKeyword() {
+        String html = "<script>const x = \"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD\";</script>";
+        List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/app", html);
+        assertFalse(findings.stream().anyMatch(f ->
                 f.type().equals(FindingType.INLINE_SCRIPT_SECRETISH.name())));
     }
 
