@@ -3,6 +3,22 @@
 ClientSideEye is a Burp Suite extension for identifying **client-side security anti-patterns**
 such as hidden/disabled privileged controls and passwords rendered in HTML responses.
 
+## Quick Start (60 seconds)
+
+1. Build and load extension JAR in Burp:
+   - `gradle clean jar`
+   - Burp `Extensions -> Installed -> Add` (Java), select built JAR
+2. Confirm Burp output shows:
+   - `[ClientSideEye] Browser bridge listening on http://127.0.0.1:<port> ...`
+3. Load unpacked browser bridge extension from:
+   - `browser-extension/clientsideeye-bridge/`
+4. Open target page, click browser extension button:
+   - `Scan Current Tab + Send to ClientSideEye`
+5. In popup, confirm:
+   - `Bridge: http://127.0.0.1:<port>`
+   - `Sent: <n>`
+6. Open Burp `ClientSideEye` tab and triage findings.
+
 ## Features
 - Detects plaintext password values in HTML
 - Identifies hidden/disabled actionable UI controls
@@ -12,6 +28,7 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 - Detects common DevTools blocking/detection logic and provides a bypass snippet
 - Exports findings as JSON
 - Analyzes in-scope Site Map traffic
+- Accepts runtime DOM findings via localhost Browser Bridge (for SPA/hash-route pages)
 
 ## Installation
 
@@ -39,7 +56,7 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
 
 2. Open the ClientSideEye tab
 
-3. Click Analyze Site Map (in-scope) or use right-click send-to (if enabled)
+3. Click **Analyze Site Map (in-scope)** or use right-click send-to from Proxy/HTTP History
 
 4. Triage findings by Severity and Confidence
 <img width="1501" height="855" alt="image" src="https://github.com/user-attachments/assets/e3b67ed3-7893-4cf0-84a0-a0c50a0b4a99" />
@@ -62,6 +79,10 @@ The Inspector will jump directly to the relevant element, allowing you to:
 - Inspect attributes and event handlers
 - Manually validate whether server-side authorization is enforced
 
+Notes:
+- Find Hints now prefer `data-testid` when present (before generated IDs).
+- Reveal snippet removes common disabled controls (`disabled`, `aria-disabled`, `pf-m-disabled`, `is-disabled`, `btn-disabled`).
+
 ## Finding Types
 
 - PASSWORD_VALUE_IN_DOM
@@ -77,10 +98,15 @@ The Inspector will jump directly to the relevant element, allowing you to:
 
 ClientSideEye starts a local bridge server at:
 
-- `http://127.0.0.1:17373/api/health`
-- `http://127.0.0.1:17373/api/finding`
+- `http://127.0.0.1:<port>/api/health`
+- `http://127.0.0.1:<port>/api/finding`
 
 This lets an external browser extension or CLI submit findings from rendered DOM state (useful for SPA/hash routes where controls are not present in raw HTTP HTML).
+
+Bridge port behavior:
+- Default port is `17373`.
+- If busy, ClientSideEye automatically tries `17374` to `17382`.
+- Active port is logged in Burp extension output.
 
 ### POST format
 
@@ -125,6 +151,51 @@ A starter Chromium extension is included at:
 - `browser-extension/clientsideeye-bridge/popup.js`
 
 It scans the current tab for actionable disabled/hidden controls and posts findings to the local bridge.
+
+## SPA/Hash Route Guidance
+
+For routes like:
+
+- `https://target/app/#/settings/localization`
+
+the `#/...` fragment is client-side routing and often does not exist as a discrete server URL in Site Map.
+
+Use one of these:
+- Browser Bridge (recommended): send runtime DOM findings directly to ClientSideEye.
+- Proxy/HTTP History send-to for underlying API responses and shell HTML.
+
+## Troubleshooting
+
+### Browser bridge port in use
+
+If logs show:
+
+- `Default port 17373 was busy. Using fallback port 17374.`
+
+this is expected. Reload the browser bridge extension so it can probe the active port.
+
+### Browser extension not sending findings
+
+1. Confirm Burp output includes:
+   - `Browser bridge listening on http://127.0.0.1:<port> ...`
+2. Reload browser extension after any `manifest.json` change.
+3. Re-open popup and run scan again.
+4. Check popup status for:
+   - `Bridge: http://127.0.0.1:<port>`
+   - `Sent: <n>`
+
+### Find Hint or Reveal snippet syntax errors
+
+If Console shows `SyntaxError` for hint snippets, update to the latest build. Current hints emit quote-safe selectors, for example:
+
+```js
+inspect(document.querySelector('[data-testid="localization-tab-save"]'))
+```
+
+### False positives from source maps/assets
+
+ClientSideEye skips non-HTML payloads (e.g., `.js.map`, `.js`, `.css`, images/fonts) during HTML analysis.  
+If old findings remain, click **Clear Findings** and run analysis again.
 
 ## Non-goals
 
