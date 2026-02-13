@@ -27,4 +27,19 @@ class FindHintBuilderTest {
         assertTrue(result.hints.stream().anyMatch(h ->
                 h.contains("Elements/Inspector search (Chrome/Firefox): a[href=\"/admin/delete\"]")));
     }
+
+    @Test
+    void buildsSelectorFromDataTestIdAndRevealCanDropDisabledState() {
+        String evidence = "<button data-testid=\"localization-tab-save\" aria-disabled=\"true\" class=\"pf-v5-c-button pf-m-primary pf-m-disabled\" disabled=\"\" type=\"submit\">Save</button>";
+        FindHintBuilder.Result result = FindHintBuilder.build(evidence);
+
+        assertEquals("[data-testid=\"localization-tab-save\"]", result.bestSelector);
+        assertTrue(result.hints.stream().anyMatch(h ->
+                h.contains("document.querySelector(\"[data-testid=\\\"localization-tab-save\\\"]\")")));
+        assertTrue(result.hints.stream().anyMatch(h ->
+                h.contains("Inspector text: data-testid=\"localization-tab-save\"")));
+        assertTrue(result.revealSnippet.contains("el.removeAttribute('aria-disabled')"));
+        assertTrue(result.revealSnippet.contains("el.removeAttribute('disabled')"));
+        assertTrue(result.revealSnippet.contains("el.classList.remove('pf-m-disabled'"));
+    }
 }
