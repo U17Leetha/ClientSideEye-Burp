@@ -4,12 +4,15 @@ import burp.api.montoya.MontoyaApi;
 import com.clientsideeye.burp.core.Finding;
 import com.clientsideeye.burp.core.FindingType;
 import com.clientsideeye.burp.ui.ClientSideEyeTab;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpServer;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -19,6 +22,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class BrowserBridgeServer {
     private static final String HOST = "127.0.0.1";
@@ -26,119 +31,189 @@ public final class BrowserBridgeServer {
 
     private final MontoyaApi api;
     private final ClientSideEyeTab tab;
-    private HttpServer server;
+    private final ExecutorService exec;
+    private volatile boolean running;
+    private ServerSocket serverSocket;
 
     public BrowserBridgeServer(MontoyaApi api, ClientSideEyeTab tab) {
         this.api = api;
         this.tab = tab;
+        this.exec = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "ClientSideEye-bridge");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
-    public void start() {
-        if (server != null) return;
+    public synchronized void start() {
+        if (running) return;
         try {
-            server = HttpServer.create(new InetSocketAddress(HOST, PORT), 0);
-            server.createContext("/api/health", new HealthHandler());
-            server.createContext("/api/finding", new FindingHandler(api, tab));
-            server.setExecutor(null);
-            server.start();
+            serverSocket = new ServerSocket();
+            serverSocket.bind(new InetSocketAddress(HOST, PORT), 50);
+            serverSocket.setSoTimeout(1000);
+            running = true;
+            exec.submit(this::acceptLoop);
             api.logging().logToOutput("[ClientSideEye] Browser bridge listening on http://" + HOST + ":" + PORT + " (/api/health, /api/finding)");
         } catch (IOException e) {
             api.logging().logToError("[ClientSideEye] Browser bridge failed to start: " + e);
         }
     }
 
-    private static final class HealthHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange ex) throws IOException {
-            if (!"GET".equalsIgnoreCase(ex.getRequestMethod()) && !"OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
-                respond(ex, 405, "Method not allowed");
-                return;
+    private void acceptLoop() {
+        while (running) {
+            try {
+                Socket s = serverSocket.accept();
+                handleClient(s);
+            } catch (SocketTimeoutException ignored) {
+                // periodic loop check
+            } catch (Exception e) {
+                if (running) {
+                    api.logging().logToError("[ClientSideEye] Bridge accept error: " + e);
+                }
             }
-            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
-                respond(ex, 204, "");
-                return;
-            }
-            respond(ex, 200, "{\"status\":\"ok\"}");
         }
     }
 
-    private static final class FindingHandler implements HttpHandler {
-        private final MontoyaApi api;
-        private final ClientSideEyeTab tab;
+    private void handleClient(Socket socket) {
+        try (socket;
+             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+             BufferedWriter out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))) {
 
-        FindingHandler(MontoyaApi api, ClientSideEyeTab tab) {
-            this.api = api;
-            this.tab = tab;
-        }
-
-        @Override
-        public void handle(HttpExchange ex) throws IOException {
-            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
-                respond(ex, 204, "");
-                return;
-            }
-            if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
-                respond(ex, 405, "Method not allowed");
+            String requestLine = in.readLine();
+            if (requestLine == null || requestLine.isBlank()) {
+                writeResponse(out, 400, "application/json; charset=utf-8", "{\"error\":\"bad request\"}");
                 return;
             }
 
-            String body = readAll(ex.getRequestBody());
-            Map<String, String> form = parseFormEncoded(body);
+            String[] reqParts = requestLine.split(" ");
+            if (reqParts.length < 2) {
+                writeResponse(out, 400, "application/json; charset=utf-8", "{\"error\":\"bad request\"}");
+                return;
+            }
+            String method = reqParts[0].trim().toUpperCase(Locale.ROOT);
+            String rawPath = reqParts[1].trim();
+            String path = rawPath;
+            int qIdx = rawPath.indexOf('?');
+            if (qIdx >= 0) {
+                path = rawPath.substring(0, qIdx);
+            }
 
-            String url = safe(form.get("url"));
-            if (url.isBlank()) {
-                respond(ex, 400, "{\"error\":\"url is required\"}");
+            int contentLength = 0;
+            String line;
+            while ((line = in.readLine()) != null && !line.isEmpty()) {
+                String lower = line.toLowerCase(Locale.ROOT);
+                if (lower.startsWith("content-length:")) {
+                    try {
+                        contentLength = Integer.parseInt(line.substring("content-length:".length()).trim());
+                    } catch (Exception ignored) {
+                        contentLength = 0;
+                    }
+                }
+            }
+
+            String body = "";
+            if (contentLength > 0) {
+                char[] buf = new char[contentLength];
+                int read = 0;
+                while (read < contentLength) {
+                    int n = in.read(buf, read, contentLength - read);
+                    if (n < 0) break;
+                    read += n;
+                }
+                body = new String(buf, 0, read);
+            }
+
+            if ("OPTIONS".equals(method)) {
+                writeResponse(out, 204, "text/plain; charset=utf-8", "");
                 return;
             }
 
-            String type = normalizeType(form.get("type"));
-            Finding.Severity severity = parseSeverity(form.get("severity"));
-            int confidence = parseInt(form.get("confidence"), 55);
-            String title = defaultIfBlank(form.get("title"), "Browser-reported client-side control finding");
-            String summary = defaultIfBlank(form.get("summary"),
-                    "A browser extension submitted a client-side control signal for review.");
-            String evidence = defaultIfBlank(form.get("evidence"), "(no evidence)");
-            String recommendation = defaultIfBlank(form.get("recommendation"),
-                    "Validate server-side authorization for this action. Do not rely on client-side disabled/hidden states.");
-            String host = hostFromUrl(url);
+            if ("/api/health".equals(path)) {
+                if (!"GET".equals(method)) {
+                    writeResponse(out, 405, "application/json; charset=utf-8", "{\"error\":\"method not allowed\"}");
+                    return;
+                }
+                writeResponse(out, 200, "application/json; charset=utf-8", "{\"status\":\"ok\"}");
+                return;
+            }
 
-            Finding finding = new Finding(
-                    type,
-                    severity,
-                    confidence,
-                    url,
-                    host,
-                    title,
-                    summary,
-                    evidence,
-                    recommendation
-            );
+            if ("/api/finding".equals(path)) {
+                if (!"POST".equals(method)) {
+                    writeResponse(out, 405, "application/json; charset=utf-8", "{\"error\":\"method not allowed\"}");
+                    return;
+                }
+                handleFindingPost(out, body);
+                return;
+            }
 
-            List<Finding> findings = new ArrayList<>();
-            findings.add(finding);
-            tab.addFindings(findings);
-
-            String source = defaultIfBlank(form.get("source"), "browser-extension");
-            api.logging().logToOutput("[ClientSideEye] Bridge accepted finding from " + source + " | " + type + " | " + severity + " (" + confidence + ") | " + url);
-            respond(ex, 200, "{\"accepted\":1}");
+            writeResponse(out, 404, "application/json; charset=utf-8", "{\"error\":\"not found\"}");
+        } catch (Exception e) {
+            api.logging().logToError("[ClientSideEye] Bridge client error: " + e);
         }
     }
 
-    private static void respond(HttpExchange ex, int code, String body) throws IOException {
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-        ex.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-        ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+    private void handleFindingPost(BufferedWriter out, String body) throws IOException {
+        Map<String, String> form = parseFormEncoded(body);
+        String url = safe(form.get("url"));
+        if (url.isBlank()) {
+            writeResponse(out, 400, "application/json; charset=utf-8", "{\"error\":\"url is required\"}");
+            return;
+        }
 
-        byte[] out = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
-        ex.sendResponseHeaders(code, out.length);
-        ex.getResponseBody().write(out);
-        ex.close();
+        String type = normalizeType(form.get("type"));
+        Finding.Severity severity = parseSeverity(form.get("severity"));
+        int confidence = parseInt(form.get("confidence"), 55);
+        String title = defaultIfBlank(form.get("title"), "Browser-reported client-side control finding");
+        String summary = defaultIfBlank(form.get("summary"),
+                "A browser extension submitted a client-side control signal for review.");
+        String evidence = defaultIfBlank(form.get("evidence"), "(no evidence)");
+        String recommendation = defaultIfBlank(form.get("recommendation"),
+                "Validate server-side authorization for this action. Do not rely on client-side disabled/hidden states.");
+        String host = hostFromUrl(url);
+
+        Finding finding = new Finding(
+                type,
+                severity,
+                confidence,
+                url,
+                host,
+                title,
+                summary,
+                evidence,
+                recommendation
+        );
+
+        List<Finding> findings = new ArrayList<>();
+        findings.add(finding);
+        tab.addFindings(findings);
+
+        String source = defaultIfBlank(form.get("source"), "browser-extension");
+        api.logging().logToOutput("[ClientSideEye] Bridge accepted finding from " + source + " | " + type + " | " + severity + " (" + confidence + ") | " + url);
+        writeResponse(out, 200, "application/json; charset=utf-8", "{\"accepted\":1}");
     }
 
-    private static String readAll(InputStream in) throws IOException {
-        byte[] buf = in.readAllBytes();
-        return new String(buf, StandardCharsets.UTF_8);
+    private static void writeResponse(BufferedWriter out, int status, String contentType, String body) throws IOException {
+        String statusText = switch (status) {
+            case 200 -> "OK";
+            case 204 -> "No Content";
+            case 400 -> "Bad Request";
+            case 404 -> "Not Found";
+            case 405 -> "Method Not Allowed";
+            default -> "Error";
+        };
+        byte[] bodyBytes = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
+        out.write("HTTP/1.1 " + status + " " + statusText + "\r\n");
+        out.write("Content-Type: " + contentType + "\r\n");
+        out.write("Content-Length: " + bodyBytes.length + "\r\n");
+        out.write("Access-Control-Allow-Origin: *\r\n");
+        out.write("Access-Control-Allow-Methods: GET,POST,OPTIONS\r\n");
+        out.write("Access-Control-Allow-Headers: Content-Type\r\n");
+        out.write("Connection: close\r\n");
+        out.write("\r\n");
+        if (bodyBytes.length > 0) {
+            out.write(new String(bodyBytes, StandardCharsets.UTF_8));
+        }
+        out.flush();
     }
 
     private static Map<String, String> parseFormEncoded(String body) {
