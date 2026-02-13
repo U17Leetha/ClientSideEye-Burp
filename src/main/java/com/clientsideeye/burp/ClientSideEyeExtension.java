@@ -41,6 +41,18 @@ public class ClientSideEyeExtension implements BurpExtension {
         api.userInterface().registerSuiteTab("ClientSideEye", tab);
         this.bridgeServer = new BrowserBridgeServer(api, tab);
         this.bridgeServer.start();
+        api.extension().registerUnloadingHandler(() -> {
+            try {
+                if (bridgeServer != null) bridgeServer.stop();
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                if (bg != null) bg.shutdownNow();
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        });
 
         // Right-click: Send selected items for analysis (Proxy, Target, Repeater, Logger, etc.)
         api.userInterface().registerContextMenuItemsProvider(new SendToClientSideEyeMenu(api, tab, bg));

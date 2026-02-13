@@ -28,12 +28,14 @@ import java.util.concurrent.Executors;
 public final class BrowserBridgeServer {
     private static final String HOST = "127.0.0.1";
     private static final int PORT = 17373;
+    private static final int MAX_PORT_ATTEMPTS = 10;
 
     private final MontoyaApi api;
     private final ClientSideEyeTab tab;
     private final ExecutorService exec;
     private volatile boolean running;
     private ServerSocket serverSocket;
+    private int boundPort = -1;
 
     public BrowserBridgeServer(MontoyaApi api, ClientSideEyeTab tab) {
         this.api = api;
@@ -47,16 +49,45 @@ public final class BrowserBridgeServer {
 
     public synchronized void start() {
         if (running) return;
-        try {
-            serverSocket = new ServerSocket();
-            serverSocket.bind(new InetSocketAddress(HOST, PORT), 50);
-            serverSocket.setSoTimeout(1000);
-            running = true;
-            exec.submit(this::acceptLoop);
-            api.logging().logToOutput("[ClientSideEye] Browser bridge listening on http://" + HOST + ":" + PORT + " (/api/health, /api/finding)");
-        } catch (IOException e) {
-            api.logging().logToError("[ClientSideEye] Browser bridge failed to start: " + e);
+        IOException last = null;
+        for (int i = 0; i < MAX_PORT_ATTEMPTS; i++) {
+            int candidatePort = PORT + i;
+            try {
+                serverSocket = new ServerSocket();
+                serverSocket.setReuseAddress(true);
+                serverSocket.bind(new InetSocketAddress(HOST, candidatePort), 50);
+                serverSocket.setSoTimeout(1000);
+                boundPort = candidatePort;
+                running = true;
+                exec.submit(this::acceptLoop);
+                api.logging().logToOutput("[ClientSideEye] Browser bridge listening on http://" + HOST + ":" + boundPort + " (/api/health, /api/finding)");
+                if (boundPort != PORT) {
+                    api.logging().logToOutput("[ClientSideEye] Default port " + PORT + " was busy. Using fallback port " + boundPort + ".");
+                }
+                return;
+            } catch (IOException e) {
+                last = e;
+                try {
+                    if (serverSocket != null) serverSocket.close();
+                } catch (IOException ignored) {}
+                serverSocket = null;
+            }
         }
+        api.logging().logToError("[ClientSideEye] Browser bridge failed to start after " + MAX_PORT_ATTEMPTS + " port attempts from " + PORT + ": " + last);
+    }
+
+    public synchronized void stop() {
+        running = false;
+        try {
+            if (serverSocket != null) {
+                serverSocket.close();
+            }
+        } catch (IOException ignored) {
+            // best-effort close
+        } finally {
+            serverSocket = null;
+        }
+        exec.shutdownNow();
     }
 
     private void acceptLoop() {

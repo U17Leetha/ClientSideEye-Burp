@@ -33,12 +33,13 @@ final class FindHintBuilder {
         String action = extractAttr(evidence, "action");
         String text = extractInnerText(evidence);
         String bestSelector = bestCssSelector(id, dataTestId, name, ariaLabel, type, value, href, src, action);
+        String jsBestSelector = jsSingleQuoteEscape(bestSelector);
 
         List<String> hints = new ArrayList<>();
 
         if (!bestSelector.isBlank()) {
-            hints.add("Console (Chrome/Firefox): inspect(document.querySelector(\"" + bestSelector + "\"))");
-            hints.add("Console (Chrome/Firefox): document.querySelector(\"" + bestSelector + "\")?.scrollIntoView({block:'center'})");
+            hints.add("Console (Chrome/Firefox): inspect(document.querySelector('" + jsBestSelector + "'))");
+            hints.add("Console (Chrome/Firefox): document.querySelector('" + jsBestSelector + "')?.scrollIntoView({block:'center'})");
             hints.add("Elements/Inspector search (Chrome/Firefox): " + bestSelector);
         }
 
@@ -76,19 +77,23 @@ final class FindHintBuilder {
         }
 
         String revealSelector = bestSelector.isBlank() ? "<selector>" : bestSelector;
+        String jsRevealSelector = jsSingleQuoteEscape(revealSelector);
         String revealFallbackText = jsSingleQuoteEscape(text);
         String revealFallbackType = jsSingleQuoteEscape(type);
         String revealFallbackTestId = jsSingleQuoteEscape(dataTestId);
         String revealSnippet =
-                "const targetSelector = \"" + revealSelector + "\";\n" +
-                        "let el = targetSelector === \"<selector>\" ? null : document.querySelector(targetSelector);\n" +
-                        "if (!el && '" + revealFallbackTestId + "') el = document.querySelector('[data-testid=\"" + cssEscape(dataTestId) + "\"]');\n" +
-                        "if (!el && '" + revealFallbackText + "') {\n" +
-                        "  const want = '" + revealFallbackText + "'.toLowerCase();\n" +
+                "const targetSelector = '" + jsRevealSelector + "';\n" +
+                        "const fallbackTestId = '" + revealFallbackTestId + "';\n" +
+                        "const fallbackText = '" + revealFallbackText + "';\n" +
+                        "const fallbackType = '" + revealFallbackType + "';\n" +
+                        "let el = targetSelector === '<selector>' ? null : document.querySelector(targetSelector);\n" +
+                        "if (!el && fallbackTestId) el = document.querySelector('[data-testid=\"' + fallbackTestId + '\"]');\n" +
+                        "if (!el && fallbackText) {\n" +
+                        "  const want = fallbackText.toLowerCase();\n" +
                         "  el = [...document.querySelectorAll('button,a,input,[role=\"button\"]')].find(n => ((n.innerText||n.textContent||n.value||'').trim().toLowerCase() === want));\n" +
                         "}\n" +
-                        "if (!el && '" + revealFallbackType + "') {\n" +
-                        "  el = document.querySelector('input[type=\"" + cssEscape(type) + "\"],button[type=\"" + cssEscape(type) + "\"]');\n" +
+                        "if (!el && fallbackType) {\n" +
+                        "  el = document.querySelector('input[type=\"' + fallbackType + '\"],button[type=\"' + fallbackType + '\"]');\n" +
                         "}\n" +
                         "if (el) {\n" +
                         "  el.hidden = false;\n" +
@@ -147,8 +152,8 @@ final class FindHintBuilder {
     }
 
     static String bestCssSelector(String id, String dataTestId, String name, String ariaLabel, String type, String value, String href, String src, String action) {
-        if (id != null && !id.isBlank()) return "[id=\"" + cssEscape(id) + "\"]";
         if (dataTestId != null && !dataTestId.isBlank()) return "[data-testid=\"" + cssEscape(dataTestId) + "\"]";
+        if (id != null && !id.isBlank()) return "[id=\"" + cssEscape(id) + "\"]";
         if (name != null && !name.isBlank()) return "[name=\"" + cssEscape(name) + "\"]";
         if (ariaLabel != null && !ariaLabel.isBlank()) return "[aria-label=\"" + cssEscape(ariaLabel) + "\"]";
         if (type != null && !type.isBlank()) {

@@ -7,11 +7,17 @@
     "default_title": "ClientSideEye Bridge",
     "default_popup": "popup.html"
   },
-  "permissions": [
-    "activeTab",
-    "scripting"
-  ],
+  "permissions": ["activeTab", "scripting"],
   "host_permissions": [
-    "http://127.0.0.1:17373/*"
+    "http://127.0.0.1:17373/*",
+    "http://127.0.0.1:17374/*",
+    "http://127.0.0.1:17375/*",
+    "http://127.0.0.1:17376/*",
+    "http://127.0.0.1:17377/*",
+    "http://127.0.0.1:17378/*",
+    "http://127.0.0.1:17379/*",
+    "http://127.0.0.1:17380/*",
+    "http://127.0.0.1:17381/*",
+    "http://127.0.0.1:17382/*"
   ]
 }

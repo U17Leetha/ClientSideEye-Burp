@@ -14,8 +14,8 @@ class FindHintBuilderTest {
 
         assertEquals("[id=\"save\"]", result.bestSelector);
         assertTrue(result.hints.stream().anyMatch(h ->
-                h.contains("document.querySelector(\"[id=\\\"save\\\"]\")")));
-        assertTrue(result.revealSnippet.contains("document.querySelector(\"[id=\\\"save\\\"]\")"));
+                h.contains("document.querySelector('[id=\"save\"]')")));
+        assertTrue(result.revealSnippet.contains("const targetSelector = '[id=\"save\"]';"));
     }
 
     @Test
@@ -35,7 +35,7 @@ class FindHintBuilderTest {
 
         assertEquals("[data-testid=\"localization-tab-save\"]", result.bestSelector);
         assertTrue(result.hints.stream().anyMatch(h ->
-                h.contains("document.querySelector(\"[data-testid=\\\"localization-tab-save\\\"]\")")));
+                h.contains("document.querySelector('[data-testid=\"localization-tab-save\"]')")));
         assertTrue(result.hints.stream().anyMatch(h ->
                 h.contains("Inspector text: data-testid=\"localization-tab-save\"")));
         assertTrue(result.revealSnippet.contains("el.removeAttribute('aria-disabled')"));
