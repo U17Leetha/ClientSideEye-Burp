@@ -232,6 +232,7 @@ public class ClientSideEyeTab extends JPanel {
 
             int analyzed = 0;
             int added = 0;
+            int skippedNonHtml = 0;
 
             for (HttpRequestResponse rr : items) {
                 if (rr == null || rr.request() == null || rr.response() == null) continue;
@@ -241,6 +242,10 @@ public class ClientSideEyeTab extends JPanel {
                 if (body == null || body.isBlank()) continue;
 
                 String url = rr.request().url();
+                if (!HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body)) {
+                    skippedNonHtml++;
+                    continue;
+                }
                 List<Finding> f = HtmlAnalyzer.analyzeHtml(url, body);
                 analyzed++;
                 if (!f.isEmpty()) {
@@ -249,7 +254,7 @@ public class ClientSideEyeTab extends JPanel {
                 }
             }
 
-            api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + analyzed + " | Findings added: " + added);
+            api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + analyzed + " | Findings added: " + added + " | Skipped (non-HTML): " + skippedNonHtml);
         } catch (Exception e) {
             api.logging().logToError("[ClientSideEye] Site Map analyze error: " + e);
         }

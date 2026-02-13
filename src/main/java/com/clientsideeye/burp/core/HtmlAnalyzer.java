@@ -22,6 +22,29 @@ public final class HtmlAnalyzer {
             "save", "submit", "update", "create", "add", "apply", "confirm"
     };
 
+    // Quick prefilter to avoid scanning obvious non-HTML payloads (e.g., source maps).
+    public static boolean looksLikeHtmlForAnalysis(String url, String body) {
+        if (body == null || body.isBlank()) return false;
+        String u = url == null ? "" : url.toLowerCase(Locale.ROOT);
+        if (u.matches(".*\\.(map|js|mjs|css|json|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot)(\\?.*)?$")) return false;
+
+        String t = body.trim();
+        if (t.startsWith("{") || t.startsWith("[")) {
+            String lower = t.toLowerCase(Locale.ROOT);
+            if (lower.contains("\"version\"") && lower.contains("\"sources\"")) return false; // sourcemap-like
+            if (lower.contains("\"openapi\"") || lower.contains("\"swagger\"")) return false; // API docs json
+        }
+
+        String lower = t.toLowerCase(Locale.ROOT);
+        return lower.contains("<html")
+                || lower.contains("<body")
+                || lower.contains("<form")
+                || lower.contains("<input")
+                || lower.contains("<button")
+                || lower.contains("<select")
+                || lower.contains("<textarea");
+    }
+
     // Capture small snippets for evidence; keep it readable and stable
     private static String shrink(String s, int max) {
         if (s == null) return "";
@@ -40,6 +63,7 @@ public final class HtmlAnalyzer {
 
     public static List<Finding> analyzeHtml(String url, String html) {
         if (html == null || html.isBlank()) return List.of();
+        if (!looksLikeHtmlForAnalysis(url, html)) return List.of();
 
         List<Finding> out = new ArrayList<>();
         String host = hostFromUrl(url);

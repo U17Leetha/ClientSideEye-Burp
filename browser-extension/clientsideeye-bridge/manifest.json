@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "ClientSideEye Bridge",
+  "version": "0.1.0",
+  "description": "Scans current page for client-side disabled/hidden controls and sends findings to Burp ClientSideEye bridge.",
+  "action": {
+    "default_title": "ClientSideEye Bridge",
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:17373/*"
+  ]
+}

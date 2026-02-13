@@ -82,4 +82,10 @@ class HtmlAnalyzerTest {
         assertTrue(findings.stream().anyMatch(f ->
                 f.type().equals(FindingType.DEVTOOLS_BLOCKING.name())));
     }
+
+    @Test
+    void skipsSourcemapPayloadAsNonHtml() {
+        String body = "{\"version\":3,\"sources\":[\"a.js\"],\"names\":[],\"mappings\":\"\"}";
+        assertFalse(HtmlAnalyzer.looksLikeHtmlForAnalysis("https://example.test/assets/app.js.map", body));
+    }
 }

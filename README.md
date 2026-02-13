@@ -73,6 +73,59 @@ The Inspector will jump directly to the relevant element, allowing you to:
 - INLINE_SCRIPT_SECRETISH
 - DEVTOOLS_BLOCKING
 
+## Browser Bridge (for Runtime DOM Findings)
+
+ClientSideEye starts a local bridge server at:
+
+- `http://127.0.0.1:17373/api/health`
+- `http://127.0.0.1:17373/api/finding`
+
+This lets an external browser extension or CLI submit findings from rendered DOM state (useful for SPA/hash routes where controls are not present in raw HTTP HTML).
+
+### POST format
+
+`Content-Type: application/x-www-form-urlencoded`
+
+Required:
+
+- `url`
+
+Optional:
+
+- `type` (defaults to `HIDDEN_OR_DISABLED_CONTROL`)
+- `severity` (`HIGH|MEDIUM|LOW|INFO`, default `MEDIUM`)
+- `confidence` (0-100, default `55`)
+- `title`
+- `summary`
+- `evidence`
+- `recommendation`
+- `source`
+
+Example:
+
+```bash
+curl -X POST "http://127.0.0.1:17373/api/finding" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "source=manual-test" \
+  --data-urlencode "url=https://example.test/app#/settings" \
+  --data-urlencode "type=HIDDEN_OR_DISABLED_CONTROL" \
+  --data-urlencode "severity=MEDIUM" \
+  --data-urlencode "confidence=75" \
+  --data-urlencode "title=Client-side disabled save control in rendered DOM" \
+  --data-urlencode "summary=Save action was disabled client-side and could be re-enabled in DevTools." \
+  --data-urlencode "evidence=<button data-testid='save' aria-disabled='true' disabled>Save</button>"
+```
+
+### Included starter browser extension
+
+A starter Chromium extension is included at:
+
+- `browser-extension/clientsideeye-bridge/manifest.json`
+- `browser-extension/clientsideeye-bridge/popup.html`
+- `browser-extension/clientsideeye-bridge/popup.js`
+
+It scans the current tab for actionable disabled/hidden controls and posts findings to the local bridge.
+
 ## Non-goals
 
 ClientSideEye does not exploit vulnerabilities or bypass authorization.

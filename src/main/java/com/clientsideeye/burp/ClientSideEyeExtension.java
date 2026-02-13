@@ -8,6 +8,7 @@ import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 
 import com.clientsideeye.burp.core.Finding;
 import com.clientsideeye.burp.core.HtmlAnalyzer;
+import com.clientsideeye.burp.integration.BrowserBridgeServer;
 import com.clientsideeye.burp.ui.ClientSideEyeTab;
 
 import javax.swing.*;
@@ -23,6 +24,7 @@ public class ClientSideEyeExtension implements BurpExtension {
     private MontoyaApi api;
     private ExecutorService bg;
     private ClientSideEyeTab tab;
+    private BrowserBridgeServer bridgeServer;
 
     @Override
     public void initialize(MontoyaApi api) {
@@ -37,6 +39,8 @@ public class ClientSideEyeExtension implements BurpExtension {
 
         this.tab = new ClientSideEyeTab(api, bg);
         api.userInterface().registerSuiteTab("ClientSideEye", tab);
+        this.bridgeServer = new BrowserBridgeServer(api, tab);
+        this.bridgeServer.start();
 
         // Right-click: Send selected items for analysis (Proxy, Target, Repeater, Logger, etc.)
         api.userInterface().registerContextMenuItemsProvider(new SendToClientSideEyeMenu(api, tab, bg));
@@ -81,6 +85,7 @@ public class ClientSideEyeExtension implements BurpExtension {
                 int analyzed = 0;
                 int skippedMissingResponse = 0;
                 int skippedEmptyBody = 0;
+                int skippedNonHtml = 0;
 
                 for (HttpRequestResponse rr : selected) {
                     if (rr == null || rr.request() == null || rr.response() == null) {
@@ -92,6 +97,10 @@ public class ClientSideEyeExtension implements BurpExtension {
                     String body = rr.response().bodyToString();
                     if (body == null || body.isBlank()) {
                         skippedEmptyBody++;
+                        continue;
+                    }
+                    if (!HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body)) {
+                        skippedNonHtml++;
                         continue;
                     }
 
@@ -109,6 +118,7 @@ public class ClientSideEyeExtension implements BurpExtension {
                                 + " | Findings added: " + added
                                 + " | Skipped (no response): " + skippedMissingResponse
                                 + " | Skipped (empty body): " + skippedEmptyBody
+                                + " | Skipped (non-HTML): " + skippedNonHtml
                 );
             } catch (Exception ex) {
                 api.logging().logToError("[ClientSideEye] Right-click analyze error: " + ex);
