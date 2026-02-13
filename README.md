@@ -19,6 +19,21 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
    - `Sent: <n>`
 6. Open Burp `ClientSideEye` tab and triage findings.
 
+## Browser Extension Setup
+
+ClientSideEye includes a companion Chromium browser extension in:
+
+- `browser-extension/clientsideeye-bridge/`
+
+Load it as an unpacked extension, then click:
+
+- `Scan Current Tab + Send to ClientSideEye`
+
+The popup should show:
+
+- `Bridge: http://127.0.0.1:<port>`
+- `Sent: <n>`
+
 ## Features
 - Detects plaintext password values in HTML
 - Identifies hidden/disabled actionable UI controls
