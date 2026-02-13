@@ -26,6 +26,16 @@ class HtmlAnalyzerTest {
     }
 
     @Test
+    void detectsDisabledSaveSubmitButtonAsActionable() {
+        String html = "<button data-testid=\"localization-tab-save\" aria-disabled=\"true\" class=\"pf-v5-c-button pf-m-primary pf-m-disabled\" disabled=\"\" type=\"submit\">Save</button>";
+        List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/settings", html);
+        assertTrue(findings.stream().anyMatch(f ->
+                f.type().equals(FindingType.HIDDEN_OR_DISABLED_CONTROL.name())
+                        && f.severity() != Finding.Severity.INFO
+                        && f.confidence() >= 60));
+    }
+
+    @Test
     void detectsRolePermissionHints() {
         String html = "<div role=\"admin\">Admin Section</div>";
         List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/app", html);

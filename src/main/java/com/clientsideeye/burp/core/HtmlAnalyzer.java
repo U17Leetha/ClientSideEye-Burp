@@ -18,6 +18,9 @@ public final class HtmlAnalyzer {
             "export", "import", "service", "serviceaccount", "account",
             "sudo", "elevat", "impersonat", "grant", "revoke", "token", "key"
     };
+    private static final String[] STATE_CHANGE_KEYWORDS = new String[]{
+            "save", "submit", "update", "create", "add", "apply", "confirm"
+    };
 
     // Capture small snippets for evidence; keep it readable and stable
     private static String shrink(String s, int max) {
@@ -222,7 +225,8 @@ public final class HtmlAnalyzer {
                 || a.contains("\tdisabled")
                 || a.contains("disabled=")
                 || a.contains("aria-disabled=\"true\"")
-                || a.contains("aria-disabled='true'");
+                || a.contains("aria-disabled='true'")
+                || hasDisabledClassSignal(a);
     }
 
     private static boolean hasHiddenAttribute(String lowerAttrs) {
@@ -244,6 +248,27 @@ public final class HtmlAnalyzer {
         return lowerAttrs.contains("sr-only")
                 || lowerAttrs.contains("visually-hidden")
                 || lowerAttrs.contains("visuallyhidden");
+    }
+
+    private static boolean hasDisabledClassSignal(String lowerAttrs) {
+        return hasClassToken(lowerAttrs, "disabled")
+                || hasClassToken(lowerAttrs, "pf-m-disabled")
+                || hasClassToken(lowerAttrs, "is-disabled")
+                || hasClassToken(lowerAttrs, "btn-disabled");
+    }
+
+    private static boolean hasClassToken(String text, String token) {
+        if (text == null || text.isBlank() || token == null || token.isBlank()) return false;
+        Pattern p = Pattern.compile("(?is)\\bclass\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))");
+        Matcher m = p.matcher(text);
+        while (m.find()) {
+            String cls = m.group(1) != null ? m.group(1) : (m.group(2) != null ? m.group(2) : m.group(3));
+            if (cls == null || cls.isBlank()) continue;
+            for (String c : cls.toLowerCase(Locale.ROOT).split("\\s+")) {
+                if (token.equals(c)) return true;
+            }
+        }
+        return false;
     }
 
     private static String extractAttr(String attrs, String name) {
@@ -289,6 +314,15 @@ public final class HtmlAnalyzer {
             action += 30;
             s.reasons.add("submit");
         }
+        if (lower.contains(" disabled")
+                || lower.contains("\tdisabled")
+                || lower.contains("disabled=")
+                || lower.contains("aria-disabled=\"true\"")
+                || lower.contains("aria-disabled='true'")
+                || hasDisabledClassSignal(lower)) {
+            action += 15;
+            s.reasons.add("client-side disabled gate");
+        }
 
         // Links and data-* endpoints
         String href = extractAttr(attrs, "href").toLowerCase(Locale.ROOT);
@@ -330,8 +364,9 @@ public final class HtmlAnalyzer {
         String dataAction = extractAttr(attrs, "data-action").toLowerCase(Locale.ROOT);
         String dataUrl = extractAttr(attrs, "data-url").toLowerCase(Locale.ROOT);
         String dataEndpoint = extractAttr(attrs, "data-endpoint").toLowerCase(Locale.ROOT);
+        String dataTestId = extractAttr(attrs, "data-testid").toLowerCase(Locale.ROOT);
 
-        String idNameBlob = String.join(" ", id, name, value, ariaLabel, title, href, dataAction, dataUrl, dataEndpoint);
+        String idNameBlob = String.join(" ", id, name, value, ariaLabel, title, href, dataAction, dataUrl, dataEndpoint, dataTestId);
 
         int keywordHits = 0;
         for (String k : RISK_KEYWORDS) {
@@ -346,6 +381,13 @@ public final class HtmlAnalyzer {
         if (idNameBlob.contains("btn") || idNameBlob.contains("ctl00") || idNameBlob.contains("cphmain")) {
             conf += 5;
             s.reasons.add("webforms-ish id/name");
+        }
+        for (String k : STATE_CHANGE_KEYWORDS) {
+            if (idNameBlob.contains(k)) {
+                action += 10;
+                s.reasons.add("state-change label");
+                break;
+            }
         }
 
         int combined = conf + action;

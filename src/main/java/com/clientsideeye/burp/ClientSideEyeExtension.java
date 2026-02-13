@@ -12,6 +12,7 @@ import com.clientsideeye.burp.ui.ClientSideEyeTab;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -63,9 +64,10 @@ public class ClientSideEyeExtension implements BurpExtension {
             if (selected == null || selected.isEmpty()) {
                 return Collections.emptyList();
             }
+            List<HttpRequestResponse> snapshot = new ArrayList<>(selected);
 
             JMenuItem item = new JMenuItem("Send to ClientSideEye (analyze response HTML)");
-            item.addActionListener(e -> bg.submit(() -> analyzeSelection(selected)));
+            item.addActionListener(e -> bg.submit(() -> analyzeSelection(snapshot)));
 
             JMenu menu = new JMenu("ClientSideEye");
             menu.add(item);
@@ -76,18 +78,24 @@ public class ClientSideEyeExtension implements BurpExtension {
         private void analyzeSelection(List<HttpRequestResponse> selected) {
             try {
                 int added = 0;
+                int analyzed = 0;
+                int skippedMissingResponse = 0;
+                int skippedEmptyBody = 0;
 
                 for (HttpRequestResponse rr : selected) {
-                    if (rr == null || rr.request() == null || rr.response() == null) continue;
-
-                    // Respect Burp scope
-                    if (!rr.request().isInScope()) continue;
+                    if (rr == null || rr.request() == null || rr.response() == null) {
+                        skippedMissingResponse++;
+                        continue;
+                    }
 
                     String url = rr.request().url();
-                    String host = rr.request().httpService().host();
                     String body = rr.response().bodyToString();
-                    if (body == null || body.isBlank()) continue;
+                    if (body == null || body.isBlank()) {
+                        skippedEmptyBody++;
+                        continue;
+                    }
 
+                    analyzed++;
                     List<Finding> findings = HtmlAnalyzer.analyzeHtml(url, body);
                     if (!findings.isEmpty()) {
                         tab.addFindings(findings);
@@ -95,7 +103,13 @@ public class ClientSideEyeExtension implements BurpExtension {
                     }
                 }
 
-                api.logging().logToOutput("[ClientSideEye] Right-click analyze complete. Findings added: " + added);
+                api.logging().logToOutput(
+                        "[ClientSideEye] Right-click analyze complete. Selected: " + selected.size()
+                                + " | Analyzed: " + analyzed
+                                + " | Findings added: " + added
+                                + " | Skipped (no response): " + skippedMissingResponse
+                                + " | Skipped (empty body): " + skippedEmptyBody
+                );
             } catch (Exception ex) {
                 api.logging().logToError("[ClientSideEye] Right-click analyze error: " + ex);
             }
