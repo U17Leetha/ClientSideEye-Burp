@@ -4,8 +4,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HtmlAnalyzerTest {
 
@@ -87,5 +88,32 @@ class HtmlAnalyzerTest {
     void skipsSourcemapPayloadAsNonHtml() {
         String body = "{\"version\":3,\"sources\":[\"a.js\"],\"names\":[],\"mappings\":\"\"}";
         assertFalse(HtmlAnalyzer.looksLikeHtmlForAnalysis("https://example.test/assets/app.js.map", body));
+    }
+
+    @Test
+    void parsesControlsInsideMalformedHtmlWithJsoup() {
+        String html = "<div><button hidden onclick='go()'>Delete";
+        List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/admin", html);
+        assertTrue(findings.stream().anyMatch(f ->
+                f.type().equals(FindingType.HIDDEN_OR_DISABLED_CONTROL.name())
+                        && f.identity().contains("button")));
+    }
+
+    @Test
+    void stableKeysDifferForDistinctControlsOnSamePage() {
+        String html = """
+                <button hidden data-testid="delete-user">Delete</button>
+                <button hidden data-testid="delete-team">Delete</button>
+                """;
+        List<Finding> findings = HtmlAnalyzer.analyzeHtml("https://example.test/admin", html);
+        Finding first = findings.stream()
+                .filter(f -> f.type().equals(FindingType.HIDDEN_OR_DISABLED_CONTROL.name()))
+                .findFirst()
+                .orElseThrow();
+        Finding second = findings.stream()
+                .filter(f -> f.type().equals(FindingType.HIDDEN_OR_DISABLED_CONTROL.name()) && !f.identity().equals(first.identity()))
+                .findFirst()
+                .orElseThrow();
+        assertNotEquals(first.stableKey(), second.stableKey());
     }
 }

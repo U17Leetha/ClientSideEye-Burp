@@ -14,8 +14,12 @@ class FindHintBuilderTest {
 
         assertEquals("[id=\"save\"]", result.bestSelector);
         assertTrue(result.hints.stream().anyMatch(h ->
-                h.contains("document.querySelector('[id=\"save\"]')")));
-        assertTrue(result.revealSnippet.contains("const targetSelector = '[id=\"save\"]';"));
+                h.contains("Locate (high confidence: id):")));
+        assertTrue(result.hints.stream().anyMatch(h ->
+                h.contains("document.querySelectorAll('[id=\"save\"]')")));
+        assertTrue(result.highlightSnippet.contains("querySelectorAll('[id=\\\"save\\\"]')")
+                || result.highlightSnippet.contains("querySelectorAll('[id=\"save\"]')"));
+        assertTrue(result.revealSnippet.contains("inspect(matches[0])"));
     }
 
     @Test
@@ -25,7 +29,7 @@ class FindHintBuilderTest {
 
         assertEquals("a[href=\"/admin/delete\"]", result.bestSelector);
         assertTrue(result.hints.stream().anyMatch(h ->
-                h.contains("Elements/Inspector search (Chrome/Firefox): a[href=\"/admin/delete\"]")));
+                h.contains("Elements search (CSS): a[href=\"/admin/delete\"]")));
     }
 
     @Test
@@ -35,11 +39,22 @@ class FindHintBuilderTest {
 
         assertEquals("[data-testid=\"localization-tab-save\"]", result.bestSelector);
         assertTrue(result.hints.stream().anyMatch(h ->
-                h.contains("document.querySelector('[data-testid=\"localization-tab-save\"]')")));
+                h.contains("Locate (high confidence: data-testid):")));
         assertTrue(result.hints.stream().anyMatch(h ->
-                h.contains("Inspector text: data-testid=\"localization-tab-save\"")));
-        assertTrue(result.revealSnippet.contains("el.removeAttribute('aria-disabled')"));
-        assertTrue(result.revealSnippet.contains("el.removeAttribute('disabled')"));
-        assertTrue(result.revealSnippet.contains("el.classList.remove('pf-m-disabled'"));
+                h.contains("Locate across iframes/shadow roots:")));
+        assertTrue(result.highlightSnippet.contains("highlighted match"));
+        assertTrue(result.revealSnippet.contains("removeAttribute('aria-disabled')"));
+        assertTrue(result.revealSnippet.contains("removeAttribute('disabled')"));
+        assertTrue(result.revealSnippet.contains("classList.remove('pf-m-disabled'"));
+    }
+
+    @Test
+    void addsTextFallbackLocatorWhenNoStableAttributesExist() {
+        String evidence = "<button class=\"btn btn-danger\" disabled>Delete User</button>";
+        FindHintBuilder.Result result = FindHintBuilder.build(evidence);
+
+        assertTrue(result.hints.stream().anyMatch(h ->
+                h.contains("Locate by text (exact):")));
+        assertTrue(result.revealSnippet.contains("Delete User"));
     }
 }

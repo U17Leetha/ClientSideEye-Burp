@@ -10,14 +10,18 @@ such as hidden/disabled privileged controls and passwords rendered in HTML respo
    - Burp `Extensions -> Installed -> Add` (Java), select built JAR
 2. Confirm Burp output shows:
    - `[ClientSideEye] Browser bridge listening on http://127.0.0.1:<port> ...`
+   - `[ClientSideEye] Browser bridge token: <token>`
 3. Load unpacked browser bridge extension from:
    - `browser-extension/clientsideeye-bridge/`
-4. Open target page, click browser extension button:
-   - `Scan Current Tab + Send to ClientSideEye`
-5. In popup, confirm:
+4. In the Burp `ClientSideEye` tab, copy the displayed **Bridge Token**
+5. Paste the token into the browser extension popup and click **Save Bridge Token**
+6. Open target page, click browser extension button:
+   - `Quick Scan + Send` for a fast DOM/runtime pass
+   - or `Deep Scan (15s Runtime) + Send` for SPA/runtime changes and temporary network hooks
+7. In popup, confirm:
    - `Bridge: http://127.0.0.1:<port>`
    - `Sent: <n>`
-6. Open Burp `ClientSideEye` tab and triage findings.
+8. Open Burp `ClientSideEye` tab and triage findings.
 
 ## Browser Extension Setup
 
@@ -34,6 +38,8 @@ The popup should show:
 - `Bridge: http://127.0.0.1:<port>`
 - `Sent: <n>`
 
+The popup now requires a per-session **Bridge Token** from the Burp extension tab.
+
 ## Features
 - Detects plaintext password values in HTML
 - Identifies hidden/disabled actionable UI controls
@@ -41,9 +47,16 @@ The popup should show:
 - Highlights high-risk issues in the UI
 - Provides browser-friendly “find hints” for rapid validation
 - Detects common DevTools blocking/detection logic and provides a bypass snippet
+- Scans JavaScript for endpoint references, DOM XSS sinks, and postMessage usage
+- Detects source map references and analyzes exposed `.js.map` responses
+- Extracts runtime signals from the browser extension including storage tokens and inline script indicators
+- Enumerates runtime network/API references from the browser using `performance` resource data
+- Hooks page-context `fetch`, XHR, WebSocket, and EventSource usage during watch/scan sessions
 - Exports findings as JSON
 - Analyzes in-scope Site Map traffic
 - Accepts runtime DOM findings via localhost Browser Bridge (for SPA/hash-route pages)
+- Uses parsed HTML analysis via jsoup rather than regex-only tag matching
+- Supports live search, host-scoped Site Map scans, and export of visible rows only
 
 ## Installation
 
@@ -75,6 +88,13 @@ The popup should show:
 
 4. Triage findings by Severity and Confidence
 <img width="1501" height="855" alt="image" src="https://github.com/user-attachments/assets/e3b67ed3-7893-4cf0-84a0-a0c50a0b4a99" />
+
+Notes:
+- `Host filter` now also scopes Site Map scans when set.
+- `Search` filters across title, type, URL, evidence, finding identity, and derived area.
+- `Export visible rows only` exports the currently filtered set rather than the entire store.
+- Site Map and right-click analysis now inspect both HTML responses and JavaScript assets when they look analyzable.
+- JavaScript assets with `sourceMappingURL` comments and exposed `.js.map` responses are analyzed for extra client-side attack surface.
 
 5. Use View in Browser to validate findings
 <img width="901" height="553" alt="image" src="https://github.com/user-attachments/assets/8ecc53e8-7bb3-4c67-b7cb-1c46e8870c54" />
@@ -122,6 +142,7 @@ Bridge port behavior:
 - Default port is `17373`.
 - If busy, ClientSideEye automatically tries `17374` to `17382`.
 - Active port is logged in Burp extension output.
+- A per-session bridge token is generated on startup and shown in the Burp tab/output.
 
 ### POST format
 
@@ -167,6 +188,39 @@ A starter Chromium extension is included at:
 
 It scans the current tab for actionable disabled/hidden controls and posts findings to the local bridge.
 
+The popup also provides `Deep Scan (15s Runtime) + Send`, which repeatedly snapshots the active tab and installs temporary runtime hooks to catch SPA route changes and delayed rendering.
+
+Runtime browser collection now also looks for:
+
+- token- or secret-like values in `localStorage` / `sessionStorage`
+- endpoint references in inline/runtime scripts
+- dangerous DOM/code-execution sinks such as `innerHTML` and `eval`
+- `postMessage` usage patterns
+- runtime network/API requests referenced by `fetch`, XHR, scripts, and other observed resources
+- page-context `fetch`, XHR, WebSocket, and EventSource activity captured during instrumentation windows
+
+## BApp Positioning
+
+ClientSideEye is intended as a focused client-side enumeration extension for Burp Suite.
+
+The default Burp-side and browser-side actions are split conceptually into:
+
+- `Quick` analysis for lightweight HTML/JS/DOM review
+- `Deep` analysis for richer runtime instrumentation and SPA/runtime behavior
+
+This keeps the common path lightweight while preserving a stronger runtime mode for advanced testing.
+
+## Security Model
+
+The Browser Bridge is intentionally bound to `127.0.0.1` only.
+
+To reduce the risk of arbitrary web pages injecting spoofed findings into Burp:
+
+- `POST /api/finding` requires a per-session bridge token
+- CORS is only granted to browser extension origins
+- request bodies are size-limited
+- bridge sockets use read timeouts and worker handling to avoid a single stalled client blocking the bridge
+
 ## SPA/Hash Route Guidance
 
 For routes like:
@@ -193,9 +247,11 @@ this is expected. Reload the browser bridge extension so it can probe the active
 
 1. Confirm Burp output includes:
    - `Browser bridge listening on http://127.0.0.1:<port> ...`
+   - `Browser bridge token: <token>`
 2. Reload browser extension after any `manifest.json` change.
-3. Re-open popup and run scan again.
-4. Check popup status for:
+3. Copy the current token from the Burp `ClientSideEye` tab into the popup and click `Save Bridge Token`.
+4. Re-open popup and run scan again.
+5. Check popup status for:
    - `Bridge: http://127.0.0.1:<port>`
    - `Sent: <n>`
 

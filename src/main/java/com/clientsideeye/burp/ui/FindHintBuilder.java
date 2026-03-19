@@ -1,7 +1,9 @@
 package com.clientsideeye.burp.ui;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -12,11 +14,13 @@ final class FindHintBuilder {
     static final class Result {
         final String bestSelector;
         final List<String> hints;
+        final String highlightSnippet;
         final String revealSnippet;
 
-        Result(String bestSelector, List<String> hints, String revealSnippet) {
+        Result(String bestSelector, List<String> hints, String highlightSnippet, String revealSnippet) {
             this.bestSelector = bestSelector == null ? "" : bestSelector;
             this.hints = hints == null ? List.of() : hints;
+            this.highlightSnippet = highlightSnippet == null ? "" : highlightSnippet;
             this.revealSnippet = revealSnippet == null ? "" : revealSnippet;
         }
     }
@@ -26,98 +30,115 @@ final class FindHintBuilder {
         String dataTestId = extractAttr(evidence, "data-testid");
         String name = extractAttr(evidence, "name");
         String ariaLabel = extractAttr(evidence, "aria-label");
+        String role = extractAttr(evidence, "role");
         String type = extractAttr(evidence, "type");
         String value = extractAttr(evidence, "value");
         String href = extractAttr(evidence, "href");
         String src = extractAttr(evidence, "src");
         String action = extractAttr(evidence, "action");
         String text = extractInnerText(evidence);
-        String bestSelector = bestCssSelector(id, dataTestId, name, ariaLabel, type, value, href, src, action);
-        String jsBestSelector = jsSingleQuoteEscape(bestSelector);
 
+        List<SelectorCandidate> selectors = rankedSelectors(id, dataTestId, name, ariaLabel, role, type, value, href, src, action, text);
+        String bestSelector = selectors.isEmpty() ? "" : selectors.get(0).selector;
         List<String> hints = new ArrayList<>();
 
-        if (!bestSelector.isBlank()) {
-            hints.add("Console (Chrome/Firefox): inspect(document.querySelector('" + jsBestSelector + "'))");
-            hints.add("Console (Chrome/Firefox): document.querySelector('" + jsBestSelector + "')?.scrollIntoView({block:'center'})");
-            hints.add("Elements/Inspector search (Chrome/Firefox): " + bestSelector);
-        }
-
-        if (!id.isBlank()) {
-            hints.add("Inspector text: id=\"" + id + "\"");
-        }
-
-        if (!dataTestId.isBlank()) {
-            hints.add("Inspector text: data-testid=\"" + dataTestId + "\"");
-        }
-
-        if (!name.isBlank()) {
-            hints.add("Inspector text: name=\"" + name + "\"");
-        }
-
-        if (!ariaLabel.isBlank()) {
-            hints.add("Inspector text: aria-label=\"" + ariaLabel + "\"");
-        }
-
-        if (!href.isBlank()) {
-            hints.add("Inspector text: href=\"" + href + "\"");
+        for (SelectorCandidate candidate : selectors) {
+            hints.add(candidate.label + ": " + locateSnippet(candidate.selector));
         }
 
         if (!text.isBlank()) {
-            hints.add("Inspector text: " + text);
+            hints.add("Locate by text (exact): " + locateByTextSnippet(text, role, type));
+        }
+
+        if (!text.isBlank() || !bestSelector.isBlank()) {
+            hints.add("Locate across iframes/shadow roots: " + deepLocateSnippet(bestSelector, text, role, type));
+        }
+
+        if (!bestSelector.isBlank()) {
+            hints.add("Elements search (CSS): " + bestSelector);
+        }
+
+        if (!id.isBlank()) {
+            hints.add("Inspector search text: id=\"" + id + "\"");
+        }
+        if (!dataTestId.isBlank()) {
+            hints.add("Inspector search text: data-testid=\"" + dataTestId + "\"");
+        }
+        if (!name.isBlank()) {
+            hints.add("Inspector search text: name=\"" + name + "\"");
+        }
+        if (!ariaLabel.isBlank()) {
+            hints.add("Inspector search text: aria-label=\"" + ariaLabel + "\"");
+        }
+        if (!href.isBlank()) {
+            hints.add("Inspector search text: href=\"" + href + "\"");
+        }
+        if (!text.isBlank()) {
+            hints.add("Inspector search text: " + text);
         }
 
         String findTerm = bestEvidenceSearchTerm(evidence);
         if (!findTerm.isBlank()) {
-            hints.add("Search term (markup): " + findTerm);
+            hints.add("Markup search term: " + findTerm);
         }
-
         if (hints.isEmpty()) {
-            hints.add("Search term (markup): " + (evidence == null ? "" : evidence.replaceAll("\\s+", " ").trim()));
+            hints.add("Markup search term: " + (evidence == null ? "" : evidence.replaceAll("\\s+", " ").trim()));
         }
 
-        String revealSelector = bestSelector.isBlank() ? "<selector>" : bestSelector;
-        String jsRevealSelector = jsSingleQuoteEscape(revealSelector);
-        String revealFallbackText = jsSingleQuoteEscape(text);
-        String revealFallbackType = jsSingleQuoteEscape(type);
-        String revealFallbackTestId = jsSingleQuoteEscape(dataTestId);
-        String revealSnippet =
-                "const targetSelector = '" + jsRevealSelector + "';\n" +
-                        "const fallbackTestId = '" + revealFallbackTestId + "';\n" +
-                        "const fallbackText = '" + revealFallbackText + "';\n" +
-                        "const fallbackType = '" + revealFallbackType + "';\n" +
-                        "let el = targetSelector === '<selector>' ? null : document.querySelector(targetSelector);\n" +
-                        "if (!el && fallbackTestId) el = document.querySelector('[data-testid=\"' + fallbackTestId + '\"]');\n" +
-                        "if (!el && fallbackText) {\n" +
-                        "  const want = fallbackText.toLowerCase();\n" +
-                        "  el = [...document.querySelectorAll('button,a,input,[role=\"button\"]')].find(n => ((n.innerText||n.textContent||n.value||'').trim().toLowerCase() === want));\n" +
-                        "}\n" +
-                        "if (!el && fallbackType) {\n" +
-                        "  el = document.querySelector('input[type=\"' + fallbackType + '\"],button[type=\"' + fallbackType + '\"]');\n" +
-                        "}\n" +
-                        "if (el) {\n" +
-                        "  el.hidden = false;\n" +
-                        "  el.removeAttribute('hidden');\n" +
-                        "  el.removeAttribute('aria-hidden');\n" +
-                        "  el.removeAttribute('aria-disabled');\n" +
-                        "  if ('disabled' in el) el.disabled = false;\n" +
-                        "  el.removeAttribute('disabled');\n" +
-                        "  if (el.classList) {\n" +
-                        "    el.classList.remove('pf-m-disabled','is-disabled','btn-disabled','disabled');\n" +
-                        "  }\n" +
-                        "  el.style.display = '';\n" +
-                        "  el.style.visibility = 'visible';\n" +
-                        "  el.style.opacity = '1';\n" +
-                        "  el.style.pointerEvents = 'auto';\n" +
-                        "  el.style.filter = '';\n" +
-                        "  el.scrollIntoView({block:'center'});\n" +
-                        "  console.log('[ClientSideEye] reveal target:', el);\n" +
-                        "} else {\n" +
-                        "  console.log('[ClientSideEye] reveal target not found. Try Elements search with data-testid/text hints.');\n" +
-                        "}\n";
-
-        return new Result(bestSelector, hints, revealSnippet);
+        String highlightSnippet = highlightSnippet(bestSelector, text, role, type);
+        String revealSnippet = revealSnippet(bestSelector, dataTestId, text, role, type);
+        return new Result(bestSelector, hints, highlightSnippet, revealSnippet);
     }
+
+    private static List<SelectorCandidate> rankedSelectors(
+            String id,
+            String dataTestId,
+            String name,
+            String ariaLabel,
+            String role,
+            String type,
+            String value,
+            String href,
+            String src,
+            String action,
+            String text
+    ) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<SelectorCandidate> out = new ArrayList<>();
+        addCandidate(out, seen, "Locate (high confidence: data-testid)", attrSelector("data-testid", dataTestId));
+        addCandidate(out, seen, "Locate (high confidence: id)", attrSelector("id", id));
+        addCandidate(out, seen, "Locate (high confidence: name)", attrSelector("name", name));
+        addCandidate(out, seen, "Locate (fallback: aria-label)", attrSelector("aria-label", ariaLabel));
+        if (!href.isBlank()) addCandidate(out, seen, "Locate (fallback: href)", "a[href=\"" + cssEscape(href) + "\"]");
+        if (!action.isBlank()) addCandidate(out, seen, "Locate (fallback: form action)", "form[action=\"" + cssEscape(action) + "\"]");
+        if (!src.isBlank()) addCandidate(out, seen, "Locate (fallback: src)", "[src=\"" + cssEscape(src) + "\"]");
+        if (!type.isBlank()) {
+            if (!value.isBlank()) {
+                addCandidate(out, seen, "Locate (fallback: type + value)", "input[type=\"" + cssEscape(type) + "\"][value=\"" + cssEscape(value) + "\"]");
+            }
+            addCandidate(out, seen, "Locate (fallback: type)", "button[type=\"" + cssEscape(type) + "\"],input[type=\"" + cssEscape(type) + "\"],select[type=\"" + cssEscape(type) + "\"]");
+        }
+        if (!role.isBlank() && !text.isBlank()) {
+            addCandidate(out, seen, "Locate (fallback: role + text)", "[role=\"" + cssEscape(role) + "\"]");
+        }
+        if (!text.isBlank()) {
+            String normalized = text.length() > 40 ? text.substring(0, 40) : text;
+            addCandidate(out, seen, "Locate (fallback: button-ish text)", "button,a,[role=\"button\"],input[type=\"button\"],input[type=\"submit\"]");
+            addCandidate(out, seen, "Locate (fallback: text anchor)", "*");
+            if (!normalized.isBlank()) {
+                // keep text available for later snippets
+            }
+        }
+        return out;
+    }
+
+    private static void addCandidate(List<SelectorCandidate> out, Set<String> seen, String label, String selector) {
+        if (selector == null || selector.isBlank()) return;
+        if (!seen.add(selector)) return;
+        out.add(new SelectorCandidate(label, selector));
+    }
+
+    private record SelectorCandidate(String label, String selector) {}
 
     static String extractAttr(String text, String attr) {
         if (text == null) return "";
@@ -151,19 +172,187 @@ final class FindHintBuilder {
         return s;
     }
 
-    static String bestCssSelector(String id, String dataTestId, String name, String ariaLabel, String type, String value, String href, String src, String action) {
-        if (dataTestId != null && !dataTestId.isBlank()) return "[data-testid=\"" + cssEscape(dataTestId) + "\"]";
-        if (id != null && !id.isBlank()) return "[id=\"" + cssEscape(id) + "\"]";
-        if (name != null && !name.isBlank()) return "[name=\"" + cssEscape(name) + "\"]";
-        if (ariaLabel != null && !ariaLabel.isBlank()) return "[aria-label=\"" + cssEscape(ariaLabel) + "\"]";
-        if (type != null && !type.isBlank()) {
-            if (value != null && !value.isBlank()) return "input[type=\"" + cssEscape(type) + "\"][value=\"" + cssEscape(value) + "\"]";
-            return "button[type=\"" + cssEscape(type) + "\"],input[type=\"" + cssEscape(type) + "\"]";
-        }
-        if (href != null && !href.isBlank()) return "a[href=\"" + cssEscape(href) + "\"]";
-        if (src != null && !src.isBlank()) return "[src=\"" + cssEscape(src) + "\"]";
-        if (action != null && !action.isBlank()) return "form[action=\"" + cssEscape(action) + "\"]";
-        return "";
+    private static String attrSelector(String attr, String value) {
+        if (value == null || value.isBlank()) return "";
+        return "[" + attr + "=\"" + cssEscape(value) + "\"]";
+    }
+
+    private static String locateSnippet(String selector) {
+        String jsSelector = jsSingleQuoteEscape(selector);
+        return ""
+                + "(() => {\n"
+                + "  const matches = [...document.querySelectorAll('" + jsSelector + "')];\n"
+                + "  if (!matches.length) return console.log('[ClientSideEye] no matches for selector:', '" + jsSelector + "');\n"
+                + "  matches.forEach((el, i) => {\n"
+                + "    el.scrollIntoView({block:'center'});\n"
+                + "    console.log('[ClientSideEye] match', i, el);\n"
+                + "  });\n"
+                + "  if (matches[0] && typeof inspect === 'function') inspect(matches[0]);\n"
+                + "  return matches;\n"
+                + "})()";
+    }
+
+    private static String locateByTextSnippet(String text, String role, String type) {
+        String jsText = jsSingleQuoteEscape(text);
+        String jsRole = jsSingleQuoteEscape(role);
+        String jsType = jsSingleQuoteEscape(type);
+        return ""
+                + "(() => {\n"
+                + "  const want = '" + jsText + "'.trim().toLowerCase();\n"
+                + "  const nodes = [...document.querySelectorAll('button,a,input,select,textarea,[role=\"button\"],[role]')];\n"
+                + "  const matches = nodes.filter(el => {\n"
+                + "    const textValue = (el.innerText || el.textContent || el.value || '').replace(/\\s+/g, ' ').trim().toLowerCase();\n"
+                + "    if (want && textValue !== want) return false;\n"
+                + "    if ('" + jsRole + "' && el.getAttribute('role') !== '" + jsRole + "') return false;\n"
+                + "    if ('" + jsType + "' && (el.getAttribute('type') || '').toLowerCase() !== '" + jsType + "') return false;\n"
+                + "    return true;\n"
+                + "  });\n"
+                + "  matches.forEach((el, i) => console.log('[ClientSideEye] text match', i, el));\n"
+                + "  if (matches[0]) { matches[0].scrollIntoView({block:'center'}); if (typeof inspect === 'function') inspect(matches[0]); }\n"
+                + "  return matches;\n"
+                + "})()";
+    }
+
+    private static String deepLocateSnippet(String selector, String text, String role, String type) {
+        String jsSelector = jsSingleQuoteEscape(selector == null ? "" : selector);
+        String jsText = jsSingleQuoteEscape(text == null ? "" : text);
+        String jsRole = jsSingleQuoteEscape(role == null ? "" : role);
+        String jsType = jsSingleQuoteEscape(type == null ? "" : type);
+        return ""
+                + "(() => {\n"
+                + "  const selector = '" + jsSelector + "';\n"
+                + "  const wantText = '" + jsText + "'.trim().toLowerCase();\n"
+                + "  const seen = new Set();\n"
+                + "  const roots = [document];\n"
+                + "  [...document.querySelectorAll('*')].forEach(el => { if (el.shadowRoot) roots.push(el.shadowRoot); });\n"
+                + "  [...document.querySelectorAll('iframe')].forEach(frame => { try { if (frame.contentDocument) roots.push(frame.contentDocument); } catch (e) {} });\n"
+                + "  const matches = [];\n"
+                + "  const add = el => { if (el && !seen.has(el)) { seen.add(el); matches.push(el); } };\n"
+                + "  roots.forEach(root => {\n"
+                + "    try {\n"
+                + "      if (selector) root.querySelectorAll(selector).forEach(add);\n"
+                + "      if (!matches.length && wantText) {\n"
+                + "        root.querySelectorAll('button,a,input,select,textarea,[role],[role=\"button\"]').forEach(el => {\n"
+                + "          const textValue = (el.innerText || el.textContent || el.value || '').replace(/\\s+/g, ' ').trim().toLowerCase();\n"
+                + "          if (textValue !== wantText) return;\n"
+                + "          if ('" + jsRole + "' && el.getAttribute('role') !== '" + jsRole + "') return;\n"
+                + "          if ('" + jsType + "' && (el.getAttribute('type') || '').toLowerCase() !== '" + jsType + "') return;\n"
+                + "          add(el);\n"
+                + "        });\n"
+                + "      }\n"
+                + "    } catch (e) {}\n"
+                + "  });\n"
+                + "  matches.forEach((el, i) => console.log('[ClientSideEye] deep match', i, el));\n"
+                + "  if (matches[0]) { matches[0].scrollIntoView({block:'center'}); if (typeof inspect === 'function') inspect(matches[0]); }\n"
+                + "  return matches;\n"
+                + "})()";
+    }
+
+    private static String highlightSnippet(String selector, String text, String role, String type) {
+        String baseLocate = !selector.isBlank()
+                ? "root.querySelectorAll('" + jsSingleQuoteEscape(selector) + "').forEach(add);"
+                : "";
+        String jsText = jsSingleQuoteEscape(text == null ? "" : text);
+        String jsRole = jsSingleQuoteEscape(role == null ? "" : role);
+        String jsType = jsSingleQuoteEscape(type == null ? "" : type);
+        return ""
+                + "(() => {\n"
+                + "  const matches = [];\n"
+                + "  const seen = new Set();\n"
+                + "  const add = el => { if (el && !seen.has(el)) { seen.add(el); matches.push(el); } };\n"
+                + "  const roots = [document];\n"
+                + "  [...document.querySelectorAll('*')].forEach(el => { if (el.shadowRoot) roots.push(el.shadowRoot); });\n"
+                + "  [...document.querySelectorAll('iframe')].forEach(frame => { try { if (frame.contentDocument) roots.push(frame.contentDocument); } catch (e) {} });\n"
+                + "  roots.forEach(root => {\n"
+                + "    try {\n"
+                + "      " + baseLocate + "\n"
+                + "      if (!matches.length && '" + jsText + "') {\n"
+                + "        root.querySelectorAll('button,a,input,select,textarea,[role],[role=\"button\"]').forEach(el => {\n"
+                + "          const textValue = (el.innerText || el.textContent || el.value || '').replace(/\\s+/g, ' ').trim().toLowerCase();\n"
+                + "          if (textValue !== '" + jsText + "'.trim().toLowerCase()) return;\n"
+                + "          if ('" + jsRole + "' && el.getAttribute('role') !== '" + jsRole + "') return;\n"
+                + "          if ('" + jsType + "' && (el.getAttribute('type') || '').toLowerCase() !== '" + jsType + "') return;\n"
+                + "          add(el);\n"
+                + "        });\n"
+                + "      }\n"
+                + "    } catch (e) {}\n"
+                + "  });\n"
+                + "  matches.forEach((el, i) => {\n"
+                + "    el.dataset.clientsideeyeOutline = el.style.outline || '';\n"
+                + "    el.dataset.clientsideeyeOutlineOffset = el.style.outlineOffset || '';\n"
+                + "    el.style.outline = '3px solid #ff4d4f';\n"
+                + "    el.style.outlineOffset = '2px';\n"
+                + "    console.log('[ClientSideEye] highlighted match', i, el);\n"
+                + "  });\n"
+                + "  setTimeout(() => matches.forEach(el => {\n"
+                + "    el.style.outline = el.dataset.clientsideeyeOutline || '';\n"
+                + "    el.style.outlineOffset = el.dataset.clientsideeyeOutlineOffset || '';\n"
+                + "  }), 4000);\n"
+                + "  if (matches[0]) matches[0].scrollIntoView({block:'center'});\n"
+                + "  return matches;\n"
+                + "})()";
+    }
+
+    private static String revealSnippet(String selector, String dataTestId, String text, String role, String type) {
+        String jsSelector = jsSingleQuoteEscape(selector == null ? "" : selector);
+        String jsTestId = jsSingleQuoteEscape(dataTestId == null ? "" : dataTestId);
+        String jsText = jsSingleQuoteEscape(text == null ? "" : text);
+        String jsRole = jsSingleQuoteEscape(role == null ? "" : role);
+        String jsType = jsSingleQuoteEscape(type == null ? "" : type);
+        return ""
+                + "(() => {\n"
+                + "  const matches = [];\n"
+                + "  const seen = new Set();\n"
+                + "  const add = el => { if (el && !seen.has(el)) { seen.add(el); matches.push(el); } };\n"
+                + "  const roots = [document];\n"
+                + "  [...document.querySelectorAll('*')].forEach(el => { if (el.shadowRoot) roots.push(el.shadowRoot); });\n"
+                + "  [...document.querySelectorAll('iframe')].forEach(frame => { try { if (frame.contentDocument) roots.push(frame.contentDocument); } catch (e) {} });\n"
+                + "  roots.forEach(root => {\n"
+                + "    try {\n"
+                + "      if ('" + jsSelector + "') root.querySelectorAll('" + jsSelector + "').forEach(add);\n"
+                + "      if (!matches.length && '" + jsTestId + "') root.querySelectorAll('[data-testid=\"" + jsDoubleQuoteEscape(dataTestId == null ? "" : dataTestId) + "\"]').forEach(add);\n"
+                + "      if (!matches.length && '" + jsText + "') {\n"
+                + "        root.querySelectorAll('button,a,input,select,textarea,[role],[role=\"button\"]').forEach(el => {\n"
+                + "          const textValue = (el.innerText || el.textContent || el.value || '').replace(/\\s+/g, ' ').trim().toLowerCase();\n"
+                + "          if (textValue !== '" + jsText + "'.trim().toLowerCase()) return;\n"
+                + "          if ('" + jsRole + "' && el.getAttribute('role') !== '" + jsRole + "') return;\n"
+                + "          if ('" + jsType + "' && (el.getAttribute('type') || '').toLowerCase() !== '" + jsType + "') return;\n"
+                + "          add(el);\n"
+                + "        });\n"
+                + "      }\n"
+                + "    } catch (e) {}\n"
+                + "  });\n"
+                + "  const revealOne = (el) => {\n"
+                + "    let node = el;\n"
+                + "    while (node && node.nodeType === 1) {\n"
+                + "      node.hidden = false;\n"
+                + "      node.removeAttribute && node.removeAttribute('hidden');\n"
+                + "      node.removeAttribute && node.removeAttribute('aria-hidden');\n"
+                + "      if (node.style) {\n"
+                + "        if (node.style.display === 'none') node.style.display = '';\n"
+                + "        node.style.visibility = 'visible';\n"
+                + "        node.style.opacity = '1';\n"
+                + "        node.style.pointerEvents = 'auto';\n"
+                + "        node.style.filter = '';\n"
+                + "        node.style.maxHeight = '';\n"
+                + "        node.style.overflow = 'visible';\n"
+                + "      }\n"
+                + "      if ('disabled' in node) node.disabled = false;\n"
+                + "      node.removeAttribute && node.removeAttribute('disabled');\n"
+                + "      node.removeAttribute && node.removeAttribute('aria-disabled');\n"
+                + "      if (node.classList) node.classList.remove('pf-m-disabled','is-disabled','btn-disabled','disabled','hidden','d-none');\n"
+                + "      node = node.parentElement;\n"
+                + "    }\n"
+                + "    el.scrollIntoView({block:'center'});\n"
+                + "    el.focus && el.focus({preventScroll:true});\n"
+                + "    el.style.outline = '3px solid #fa8c16';\n"
+                + "  };\n"
+                + "  matches.forEach(revealOne);\n"
+                + "  matches.forEach((el, i) => console.log('[ClientSideEye] revealed match', i, el));\n"
+                + "  if (!matches.length) return console.log('[ClientSideEye] reveal target not found. Try the deep-locate hint first.');\n"
+                + "  if (matches[0] && typeof inspect === 'function') inspect(matches[0]);\n"
+                + "  return matches;\n"
+                + "})()";
     }
 
     static String extractInnerText(String evidence) {
@@ -176,6 +365,11 @@ final class FindHintBuilder {
     static String jsSingleQuoteEscape(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("'", "\\'");
+    }
+
+    static String jsDoubleQuoteEscape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     static String cssEscape(String s) {

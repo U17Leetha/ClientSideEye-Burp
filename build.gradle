@@ -12,7 +12,9 @@ repositories {
 dependencies {
     // BApp-friendly: compile against public Montoya API (Burp provides it at runtime)
     compileOnly "net.portswigger.burp.extensions:montoya-api:2025.12"
+    implementation "org.jsoup:jsoup:1.18.3"
     testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.10.2"
 }
 
 java {
@@ -31,6 +33,10 @@ test {
 
 jar {
     archiveBaseName = "ClientSideEye-Burp"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
     manifest {
         attributes(
             "Main-Class": "com.clientsideeye.burp.ClientSideEyeExtension"

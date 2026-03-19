@@ -30,6 +30,19 @@
                 background: #6e7781;
                 cursor: not-allowed;
             }
+            label {
+                display: block;
+                margin-top: 10px;
+                font-weight: 600;
+            }
+            input {
+                width: 100%;
+                box-sizing: border-box;
+                margin-top: 4px;
+                padding: 8px 10px;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+            }
             #status {
                 margin-top: 10px;
                 white-space: pre-wrap;
@@ -42,11 +55,22 @@
         </style>
     </head>
     <body>
-        <button id="scanSend">Scan Current Tab + Send to ClientSideEye</button>
+        <label for="bridgeToken">Bridge token</label>
+        <input
+            id="bridgeToken"
+            type="password"
+            placeholder="Paste token from Burp ClientSideEye tab"
+            autocomplete="off"
+            spellcheck="false"
+        />
+        <button id="saveToken">Save Bridge Token</button>
+        <button id="scanSend">Quick Scan + Send</button>
+        <button id="watchSend">Deep Scan (15s Runtime) + Send</button>
         <div id="status">Idle</div>
         <div class="muted">
             Bridge endpoint: auto-detects
-            http://127.0.0.1:17373-17382/api/finding
+            http://127.0.0.1:17373-17382/api/finding. The Burp extension now
+            requires a per-session bridge token and the deep scan mode installs temporary runtime hooks.
         </div>
         <script src="popup.js"></script>
     </body>

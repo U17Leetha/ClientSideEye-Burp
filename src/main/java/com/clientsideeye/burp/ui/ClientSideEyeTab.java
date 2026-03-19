@@ -6,10 +6,14 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 import com.clientsideeye.burp.core.Finding;
 import com.clientsideeye.burp.core.FindingType;
 import com.clientsideeye.burp.core.HtmlAnalyzer;
+import com.clientsideeye.burp.core.JavaScriptAnalyzer;
 import com.clientsideeye.burp.core.JsonExporter;
+import com.clientsideeye.burp.core.SourceMapAnalyzer;
 
 import javax.swing.*;
 import javax.swing.RowSorter.SortKey;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.*;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
@@ -28,6 +32,8 @@ public class ClientSideEyeTab extends JPanel {
     private final ExecutorService bg;
 
     private static final int MAX_FINDINGS = 5000;
+    private static final int SITE_MAP_SCAN_WARN_THRESHOLD = 1000;
+    private static final int SITE_MAP_SCAN_HARD_CAP = 2000;
 
     // Dedupe by stable key -> Finding (LinkedHashMap preserves insertion order)
     private final LinkedHashMap<String, Finding> findingsByKey = new LinkedHashMap<>();
@@ -39,12 +45,23 @@ public class ClientSideEyeTab extends JPanel {
 
     private final JTextArea detailArea = new JTextArea();
     private final JTextField filterHost = new JTextField();
+    private final JTextField filterSearch = new JTextField();
+    private final JTextField bridgeEndpointField = new JTextField("Bridge not started");
+    private final JTextField bridgeTokenField = new JTextField();
+    private final JSpinner scanLimitSpinner = new JSpinner(new SpinnerNumberModel(SITE_MAP_SCAN_HARD_CAP, 100, 10000, 100));
+    private final JCheckBox exportVisibleOnly = new JCheckBox("Export visible rows only", true);
 
     private final JCheckBoxMenuItem filterTypePassword = new JCheckBoxMenuItem(FindingType.PASSWORD_VALUE_IN_DOM.name(), true);
     private final JCheckBoxMenuItem filterTypeHidden = new JCheckBoxMenuItem(FindingType.HIDDEN_OR_DISABLED_CONTROL.name(), true);
     private final JCheckBoxMenuItem filterTypeRole = new JCheckBoxMenuItem(FindingType.ROLE_PERMISSION_HINT.name(), true);
     private final JCheckBoxMenuItem filterTypeInline = new JCheckBoxMenuItem(FindingType.INLINE_SCRIPT_SECRETISH.name(), true);
     private final JCheckBoxMenuItem filterTypeDevtools = new JCheckBoxMenuItem(FindingType.DEVTOOLS_BLOCKING.name(), true);
+    private final JCheckBoxMenuItem filterTypeEndpoint = new JCheckBoxMenuItem(FindingType.JAVASCRIPT_ENDPOINT_REFERENCE.name(), true);
+    private final JCheckBoxMenuItem filterTypeDomXss = new JCheckBoxMenuItem(FindingType.DOM_XSS_SINK.name(), true);
+    private final JCheckBoxMenuItem filterTypePostMessage = new JCheckBoxMenuItem(FindingType.POSTMESSAGE_HANDLER.name(), true);
+    private final JCheckBoxMenuItem filterTypeStorage = new JCheckBoxMenuItem(FindingType.STORAGE_TOKEN.name(), true);
+    private final JCheckBoxMenuItem filterTypeSourceMap = new JCheckBoxMenuItem(FindingType.SOURCE_MAP_DISCLOSURE.name(), true);
+    private final JCheckBoxMenuItem filterTypeRuntimeNetwork = new JCheckBoxMenuItem(FindingType.RUNTIME_NETWORK_REFERENCE.name(), true);
     private final JPopupMenu typeMenu = new JPopupMenu();
     private final JButton typeMenuButton = new JButton("Type…");
 
@@ -76,6 +93,12 @@ public class ClientSideEyeTab extends JPanel {
         controls.add(filterHost, c);
 
         c.gridx = 2; c.gridy = 0; c.weightx = 0;
+        controls.add(new JLabel("Search:"), c);
+
+        c.gridx = 3; c.gridy = 0; c.weightx = 1;
+        controls.add(filterSearch, c);
+
+        c.gridx = 4; c.gridy = 0; c.weightx = 0;
         controls.add(new JLabel("Type:"), c);
 
         typeMenu.add(filterTypePassword);
@@ -83,13 +106,19 @@ public class ClientSideEyeTab extends JPanel {
         typeMenu.add(filterTypeRole);
         typeMenu.add(filterTypeInline);
         typeMenu.add(filterTypeDevtools);
+        typeMenu.add(filterTypeEndpoint);
+        typeMenu.add(filterTypeDomXss);
+        typeMenu.add(filterTypePostMessage);
+        typeMenu.add(filterTypeStorage);
+        typeMenu.add(filterTypeSourceMap);
+        typeMenu.add(filterTypeRuntimeNetwork);
         typeMenuButton.addActionListener(e ->
                 typeMenu.show(typeMenuButton, 0, typeMenuButton.getHeight()));
 
-        c.gridx = 3; c.gridy = 0; c.weightx = 0.5;
+        c.gridx = 5; c.gridy = 0; c.weightx = 0.5;
         controls.add(typeMenuButton, c);
 
-        c.gridx = 4; c.gridy = 0; c.weightx = 0;
+        c.gridx = 6; c.gridy = 0; c.weightx = 0;
         controls.add(new JLabel("Severity:"), c);
 
         severityMenu.add(filterHigh);
@@ -99,21 +128,45 @@ public class ClientSideEyeTab extends JPanel {
         severityMenuButton.addActionListener(e ->
                 severityMenu.show(severityMenuButton, 0, severityMenuButton.getHeight()));
 
-        c.gridx = 5; c.gridy = 0; c.weightx = 0.0;
+        c.gridx = 7; c.gridy = 0; c.weightx = 0.0;
         controls.add(severityMenuButton, c);
-        c.gridx = 6; c.gridy = 0; c.weightx = 0.0;
+        c.gridx = 8; c.gridy = 0; c.weightx = 0.0;
         controls.add(filterFalsePositive, c);
 
-        JButton btnAnalyzeSiteMap = new JButton("Analyze Site Map (in-scope)");
+        JButton btnAnalyzeSiteMap = new JButton("Analyze Site Map (Quick)");
         JButton btnExport = new JButton("Export JSON…");
         JButton btnView = new JButton("View in Browser…");
         JButton btnPurge = new JButton("Clear Findings");
+        JButton btnCopyToken = new JButton("Copy Bridge Token");
 
-        c.gridx = 7; c.gridy = 0; c.weightx = 0;
+        c.gridx = 9; c.gridy = 0; c.weightx = 0;
         controls.add(btnAnalyzeSiteMap, c);
-        c.gridx = 8; controls.add(btnExport, c);
-        c.gridx = 9; controls.add(btnView, c);
-        c.gridx = 10; controls.add(btnPurge, c);
+        c.gridx = 10; controls.add(btnExport, c);
+        c.gridx = 11; controls.add(btnView, c);
+        c.gridx = 12; controls.add(btnPurge, c);
+
+        bridgeEndpointField.setEditable(false);
+        bridgeTokenField.setEditable(false);
+
+        c.gridx = 0; c.gridy = 1; c.weightx = 0;
+        controls.add(new JLabel("Bridge:"), c);
+        c.gridx = 1; c.gridy = 1; c.gridwidth = 4; c.weightx = 1;
+        controls.add(bridgeEndpointField, c);
+        c.gridx = 5; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
+        controls.add(new JLabel("Token:"), c);
+        c.gridx = 6; c.gridy = 1; c.gridwidth = 4; c.weightx = 1;
+        controls.add(bridgeTokenField, c);
+        c.gridx = 10; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
+        controls.add(btnCopyToken, c);
+        c.gridx = 11; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
+        controls.add(new JLabel("Scan limit:"), c);
+        c.gridx = 12; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
+        controls.add(scanLimitSpinner, c);
+
+        c.gridx = 0; c.gridy = 2; c.gridwidth = 3; c.weightx = 0;
+        controls.add(exportVisibleOnly, c);
+        c.gridx = 3; c.gridy = 2; c.gridwidth = 10; c.weightx = 1;
+        controls.add(new JLabel("Host filter also scopes Site Map scans when set."), c);
 
         add(controls, BorderLayout.NORTH);
 
@@ -156,6 +209,10 @@ public class ClientSideEyeTab extends JPanel {
         btnExport.addActionListener(e -> exportJson());
         btnView.addActionListener(e -> showViewInBrowserDialog());
         btnAnalyzeSiteMap.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
+        btnCopyToken.addActionListener(e -> {
+            copyToClipboard(bridgeTokenField.getText());
+            api.logging().logToOutput("[ClientSideEye] Copied browser bridge token to clipboard.");
+        });
         filterHigh.addActionListener(e -> refreshTable());
         filterMedium.addActionListener(e -> refreshTable());
         filterLow.addActionListener(e -> refreshTable());
@@ -166,6 +223,30 @@ public class ClientSideEyeTab extends JPanel {
         filterTypeRole.addActionListener(e -> refreshTable());
         filterTypeInline.addActionListener(e -> refreshTable());
         filterTypeDevtools.addActionListener(e -> refreshTable());
+        filterTypeEndpoint.addActionListener(e -> refreshTable());
+        filterTypeDomXss.addActionListener(e -> refreshTable());
+        filterTypePostMessage.addActionListener(e -> refreshTable());
+        filterTypeStorage.addActionListener(e -> refreshTable());
+        filterTypeSourceMap.addActionListener(e -> refreshTable());
+        filterTypeRuntimeNetwork.addActionListener(e -> refreshTable());
+        DocumentListener refreshListener = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                refreshTable();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                refreshTable();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                refreshTable();
+            }
+        };
+        filterHost.getDocument().addDocumentListener(refreshListener);
+        filterSearch.getDocument().addDocumentListener(refreshListener);
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting()) return;
@@ -185,22 +266,22 @@ public class ClientSideEyeTab extends JPanel {
         });
 
         table.addMouseListener(new java.awt.event.MouseAdapter() {
-            private void maybeToggleFalsePositive(java.awt.event.MouseEvent e) {
+            private void maybeShowFindingMenu(java.awt.event.MouseEvent e) {
                 if (!e.isPopupTrigger() && !SwingUtilities.isRightMouseButton(e)) return;
                 int viewRow = table.rowAtPoint(e.getPoint());
                 if (viewRow < 0) return;
                 table.setRowSelectionInterval(viewRow, viewRow);
-                toggleFalsePositiveForSelection();
+                showFindingContextMenu(e.getComponent(), e.getX(), e.getY());
             }
 
             @Override
             public void mousePressed(java.awt.event.MouseEvent e) {
-                maybeToggleFalsePositive(e);
+                maybeShowFindingMenu(e);
             }
 
             @Override
             public void mouseReleased(java.awt.event.MouseEvent e) {
-                maybeToggleFalsePositive(e);
+                maybeShowFindingMenu(e);
             }
         });
 
@@ -229,24 +310,58 @@ public class ClientSideEyeTab extends JPanel {
     private void analyzeSiteMapInScope() {
         try {
             List<HttpRequestResponse> items = api.siteMap().requestResponses();
+            long inScopeCount = items.stream()
+                    .filter(Objects::nonNull)
+                    .filter(rr -> rr.request() != null && rr.request().isInScope())
+                    .filter(rr -> scanHostMatches(rr.request().url()))
+                    .count();
+
+            if (inScopeCount == 0) {
+                api.logging().logToOutput("[ClientSideEye] Site Map analyze skipped. No in-scope items.");
+                return;
+            }
+
+            if (inScopeCount > SITE_MAP_SCAN_WARN_THRESHOLD) {
+                boolean proceed = confirmLargeSiteMapScan((int) Math.min(inScopeCount, Integer.MAX_VALUE));
+                if (!proceed) {
+                    api.logging().logToOutput("[ClientSideEye] Site Map analyze cancelled by user.");
+                    return;
+                }
+            }
 
             int analyzed = 0;
             int added = 0;
-            int skippedNonHtml = 0;
+            int skippedNonAnalyzable = 0;
+            int skippedByCap = 0;
+            int scanLimit = ((Number) scanLimitSpinner.getValue()).intValue();
 
             for (HttpRequestResponse rr : items) {
                 if (rr == null || rr.request() == null || rr.response() == null) continue;
                 if (!rr.request().isInScope()) continue;
+                if (!scanHostMatches(rr.request().url())) continue;
+                if (analyzed >= scanLimit) {
+                    skippedByCap++;
+                    continue;
+                }
 
                 String body = rr.response().bodyToString();
                 if (body == null || body.isBlank()) continue;
 
                 String url = rr.request().url();
-                if (!HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body)) {
-                    skippedNonHtml++;
+                boolean htmlLike = HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body);
+                boolean jsLike = JavaScriptAnalyzer.looksLikeJavaScriptForAnalysis(url, body);
+                boolean sourceMapLike = SourceMapAnalyzer.looksLikeSourceMap(url, body);
+                if (!htmlLike && !jsLike && !sourceMapLike) {
+                    skippedNonAnalyzable++;
                     continue;
                 }
-                List<Finding> f = HtmlAnalyzer.analyzeHtml(url, body);
+                List<Finding> f = new ArrayList<>();
+                if (htmlLike) f.addAll(HtmlAnalyzer.analyzeHtml(url, body));
+                if (jsLike) {
+                    f.addAll(JavaScriptAnalyzer.analyzeJavaScript(url, body));
+                    f.addAll(SourceMapAnalyzer.analyzeSourceMappingReference(url, body));
+                }
+                if (sourceMapLike) f.addAll(SourceMapAnalyzer.analyzeSourceMap(url, body));
                 analyzed++;
                 if (!f.isEmpty()) {
                     added += f.size();
@@ -254,7 +369,7 @@ public class ClientSideEyeTab extends JPanel {
                 }
             }
 
-            api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + analyzed + " | Findings added: " + added + " | Skipped (non-HTML): " + skippedNonHtml);
+            api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + analyzed + " | Findings added: " + added + " | Skipped (non-analyzable): " + skippedNonAnalyzable + " | Skipped (scan cap): " + skippedByCap + " | Host scope: " + currentScanHostScope());
         } catch (Exception e) {
             api.logging().logToError("[ClientSideEye] Site Map analyze error: " + e);
         }
@@ -262,6 +377,7 @@ public class ClientSideEyeTab extends JPanel {
 
     private void refreshTable() {
         String host = filterHost.getText().trim().toLowerCase(Locale.ROOT);
+        String search = filterSearch.getText().trim().toLowerCase(Locale.ROOT);
         boolean showHigh = filterHigh.isSelected();
         boolean showMedium = filterMedium.isSelected();
         boolean showLow = filterLow.isSelected();
@@ -273,6 +389,7 @@ public class ClientSideEyeTab extends JPanel {
 
         List<Finding> filtered = all.stream()
                 .filter(f -> host.isEmpty() || f.host().toLowerCase(Locale.ROOT).contains(host))
+                .filter(f -> search.isEmpty() || matchesSearch(f, search))
                 .filter(f -> allowedTypes.contains(f.type()))
                 .filter(f -> {
                     if (f.severity() == Severity.HIGH) return showHigh;
@@ -296,7 +413,7 @@ public class ClientSideEyeTab extends JPanel {
     private void toggleFalsePositiveForSelection() {
         int viewRow = table.getSelectedRow();
         if (viewRow < 0) {
-            JOptionPane.showMessageDialog(this, "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(api.userInterface().swingUtils().suiteFrame(), "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         int modelRow = table.convertRowIndexToModel(viewRow);
@@ -315,17 +432,36 @@ public class ClientSideEyeTab extends JPanel {
         detailArea.setCaretPosition(0);
     }
 
+    private void showFindingContextMenu(Component invoker, int x, int y) {
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem toggleFp = new JMenuItem("Toggle false positive");
+        toggleFp.addActionListener(e -> toggleFalsePositiveForSelection());
+        menu.add(toggleFp);
+        menu.show(invoker, x, y);
+    }
+
+    public void setBridgeConnectionInfo(int port, String token) {
+        SwingUtilities.invokeLater(() -> {
+            String endpoint = port > 0 ? ("http://127.0.0.1:" + port) : "Bridge not started";
+            bridgeEndpointField.setText(endpoint);
+            bridgeTokenField.setText(token == null ? "" : token);
+        });
+    }
+
 
     private void exportJson() {
         try {
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle("Export ClientSideEye JSON Report");
             chooser.setSelectedFile(new File("clientsideeye_report.json"));
-            int res = chooser.showSaveDialog(this);
+            int res = chooser.showSaveDialog(api.userInterface().swingUtils().suiteFrame());
             if (res != JFileChooser.APPROVE_OPTION) return;
 
             File out = chooser.getSelectedFile();
-            String json = JsonExporter.toJson(new ArrayList<>(findingsByKey.values()), falsePositiveKeys);
+            List<Finding> toExport = exportVisibleOnly.isSelected()
+                    ? tableModel.rowsSnapshot()
+                    : new ArrayList<>(findingsByKey.values());
+            String json = JsonExporter.toJson(toExport, falsePositiveKeys);
             Files.writeString(out.toPath(), json);
 
             api.logging().logToOutput("[ClientSideEye] Exported: " + out.getAbsolutePath());
@@ -337,7 +473,7 @@ public class ClientSideEyeTab extends JPanel {
     private void showViewInBrowserDialog() {
         int viewRow = table.getSelectedRow();
         if (viewRow < 0) {
-            JOptionPane.showMessageDialog(this, "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(api.userInterface().swingUtils().suiteFrame(), "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         int modelRow = table.convertRowIndexToModel(viewRow);
@@ -353,7 +489,7 @@ public class ClientSideEyeTab extends JPanel {
         for (String hint : hintResult.hints) hintModel.addElement(hint);
         JComboBox<String> hintCombo = new JComboBox<>(hintModel);
 
-        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "View in Browser", Dialog.ModalityType.APPLICATION_MODAL);
+        JDialog dialog = new JDialog(api.userInterface().swingUtils().suiteFrame(), "View in Browser", Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setLayout(new BorderLayout(10, 10));
 
@@ -383,11 +519,18 @@ public class ClientSideEyeTab extends JPanel {
         });
 
         String revealSnippet = hintResult.revealSnippet;
+        String highlightSnippet = hintResult.highlightSnippet;
 
         JButton copyRevealBtn = new JButton("Copy Reveal Snippet");
         copyRevealBtn.addActionListener(e -> {
             copyToClipboard(revealSnippet);
             api.logging().logToOutput("[ClientSideEye] Copied reveal snippet to clipboard.");
+        });
+
+        JButton copyHighlightBtn = new JButton("Copy Highlight Snippet");
+        copyHighlightBtn.addActionListener(e -> {
+            copyToClipboard(highlightSnippet);
+            api.logging().logToOutput("[ClientSideEye] Copied highlight snippet to clipboard.");
         });
 
         JButton copyBypassBtn = new JButton("Copy DevTools Bypass Snippet");
@@ -411,18 +554,25 @@ public class ClientSideEyeTab extends JPanel {
         top.add(copyHintBtn, c);
 
         c.gridx = 0; c.gridy = 2; c.weightx = 0;
-        top.add(new JLabel("Reveal snippet:"), c);
+        top.add(new JLabel("Highlight snippet:"), c);
         c.gridx = 1; c.gridy = 2; c.weightx = 1;
         top.add(new JLabel("Use Console in Chrome/Firefox"), c);
         c.gridx = 2; c.gridy = 2; c.weightx = 0;
+        top.add(copyHighlightBtn, c);
+
+        c.gridx = 0; c.gridy = 3; c.weightx = 0;
+        top.add(new JLabel("Reveal snippet:"), c);
+        c.gridx = 1; c.gridy = 3; c.weightx = 1;
+        top.add(new JLabel("Use Console in Chrome/Firefox"), c);
+        c.gridx = 2; c.gridy = 3; c.weightx = 0;
         top.add(copyRevealBtn, c);
 
         if (isDevtoolsFinding) {
-            c.gridx = 0; c.gridy = 3; c.weightx = 0;
+            c.gridx = 0; c.gridy = 4; c.weightx = 0;
             top.add(new JLabel("Bypass snippet:"), c);
-            c.gridx = 1; c.gridy = 3; c.weightx = 1;
+            c.gridx = 1; c.gridy = 4; c.weightx = 1;
             top.add(new JLabel("Use Console in Chrome/Firefox"), c);
-            c.gridx = 2; c.gridy = 3; c.weightx = 0;
+            c.gridx = 2; c.gridy = 4; c.weightx = 0;
             top.add(copyBypassBtn, c);
         }
 
@@ -438,9 +588,12 @@ public class ClientSideEyeTab extends JPanel {
         ta.setText(
                 "DevTools usage (Chrome/Firefox):\n" +
                         "1) Open the page in your browser\n" +
-                        "2) Use ONE Find Hint:\n" +
-                        "   - Console: paste the Console hint to jump to the element\n" +
-                        "   - Elements/Inspector: Cmd/Ctrl+F and paste the selector or text hint\n\n" +
+                        "2) Start with a Locate hint in the Console to enumerate matches\n" +
+                        "3) Use the Highlight snippet to visibly mark the match(es)\n" +
+                        "4) Use the Reveal snippet to unhide / re-enable the target when needed\n" +
+                        "5) Elements/Inspector: Cmd/Ctrl+F also works with CSS or text hints\n\n" +
+                        "Highlight snippet (Console):\n" +
+                        highlightSnippet + "\n\n" +
                         "Reveal/unhide snippet (Console):\n" +
                         revealSnippet + "\n" +
                         bypassSection +
@@ -459,7 +612,7 @@ public class ClientSideEyeTab extends JPanel {
         dialog.add(bottom, BorderLayout.SOUTH);
 
         dialog.pack();
-        dialog.setLocationRelativeTo(this);
+        dialog.setLocationRelativeTo(api.userInterface().swingUtils().suiteFrame());
         dialog.setVisible(true);
     }
 
@@ -541,11 +694,96 @@ public class ClientSideEyeTab extends JPanel {
         };
     }
 
+    private boolean confirmLargeSiteMapScan(int inScopeCount) {
+        int scanLimit = ((Number) scanLimitSpinner.getValue()).intValue();
+        final int[] decision = new int[]{JOptionPane.CLOSED_OPTION};
+        Runnable prompt = () -> decision[0] = JOptionPane.showConfirmDialog(
+                api.userInterface().swingUtils().suiteFrame(),
+                "ClientSideEye found " + inScopeCount + " in-scope Site Map items.\n"
+                        + "To stay responsive, this run will analyze at most " + scanLimit + " HTML-like responses.\n"
+                        + "Current host scope: " + currentScanHostScope() + "\n\n"
+                        + "Continue?",
+                "Large Site Map Scan",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE
+        );
+
+        if (SwingUtilities.isEventDispatchThread()) {
+            prompt.run();
+        } else {
+            try {
+                SwingUtilities.invokeAndWait(prompt);
+            } catch (Exception e) {
+                api.logging().logToError("[ClientSideEye] Large scan prompt error: " + e);
+                return false;
+            }
+        }
+
+        return decision[0] == JOptionPane.OK_OPTION;
+    }
+
+    private boolean matchesSearch(Finding finding, String search) {
+        return finding.title().toLowerCase(Locale.ROOT).contains(search)
+                || finding.url().toLowerCase(Locale.ROOT).contains(search)
+                || finding.evidence().toLowerCase(Locale.ROOT).contains(search)
+                || finding.identity().toLowerCase(Locale.ROOT).contains(search)
+                || finding.type().toLowerCase(Locale.ROOT).contains(search)
+                || findingArea(finding).toLowerCase(Locale.ROOT).contains(search);
+    }
+
+    private boolean scanHostMatches(String url) {
+        String hostScope = filterHost.getText().trim().toLowerCase(Locale.ROOT);
+        if (hostScope.isEmpty()) return true;
+        try {
+            String host = new java.net.URI(url).getHost();
+            return host != null && host.toLowerCase(Locale.ROOT).contains(hostScope);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String currentScanHostScope() {
+        String hostScope = filterHost.getText().trim();
+        return hostScope.isEmpty() ? "(all in-scope hosts)" : hostScope;
+    }
+
+    private String findingArea(Finding finding) {
+        if (finding == null) return "general";
+        try {
+            java.net.URI uri = new java.net.URI(finding.url());
+            String path = uri.getPath();
+            if (path != null && !path.isBlank() && !"/".equals(path)) {
+                String[] parts = path.split("/");
+                List<String> keep = new ArrayList<>();
+                for (String part : parts) {
+                    if (part == null || part.isBlank()) continue;
+                    keep.add(part);
+                    if (keep.size() == 2) break;
+                }
+                if (!keep.isEmpty()) return "/" + String.join("/", keep);
+            }
+        } catch (Exception ignored) {
+            // fall back to identity/type-based grouping
+        }
+
+        String identity = finding.identity() == null ? "" : finding.identity();
+        if (!identity.isBlank()) {
+            String[] parts = identity.split("\\|");
+            for (String part : parts) {
+                if (part == null || part.isBlank()) continue;
+                if (part.startsWith("http")) continue;
+                return part.length() > 40 ? part.substring(0, 40) : part;
+            }
+        }
+        return finding.type().toLowerCase(Locale.ROOT);
+    }
+
     private String renderFinding(Finding f) {
         return ""
                 + "Severity: " + f.severity() + " (" + f.confidence() + ")\n"
                 + "False positive: " + (isFalsePositive(f) ? "yes" : "no") + "\n"
                 + "Type: " + f.type() + "\n"
+                + "Area: " + findingArea(f) + "\n"
                 + "URL: " + f.url() + "\n"
                 + "Host: " + f.host() + "\n"
                 + "Title: " + f.title() + "\n"
@@ -569,6 +807,12 @@ public class ClientSideEyeTab extends JPanel {
         if (filterTypeRole.isSelected()) types.add(FindingType.ROLE_PERMISSION_HINT.name());
         if (filterTypeInline.isSelected()) types.add(FindingType.INLINE_SCRIPT_SECRETISH.name());
         if (filterTypeDevtools.isSelected()) types.add(FindingType.DEVTOOLS_BLOCKING.name());
+        if (filterTypeEndpoint.isSelected()) types.add(FindingType.JAVASCRIPT_ENDPOINT_REFERENCE.name());
+        if (filterTypeDomXss.isSelected()) types.add(FindingType.DOM_XSS_SINK.name());
+        if (filterTypePostMessage.isSelected()) types.add(FindingType.POSTMESSAGE_HANDLER.name());
+        if (filterTypeStorage.isSelected()) types.add(FindingType.STORAGE_TOKEN.name());
+        if (filterTypeSourceMap.isSelected()) types.add(FindingType.SOURCE_MAP_DISCLOSURE.name());
+        if (filterTypeRuntimeNetwork.isSelected()) types.add(FindingType.RUNTIME_NETWORK_REFERENCE.name());
         return types;
     }
 
@@ -577,12 +821,16 @@ public class ClientSideEyeTab extends JPanel {
     // -------------------------
     private class FindingsTableModel extends AbstractTableModel {
 
-        private final String[] cols = new String[]{"Severity", "Confidence", "FP", "Type", "Host", "Title", "URL"};
+        private final String[] cols = new String[]{"Severity", "Confidence", "FP", "Type", "Area", "Host", "Title", "URL"};
         private List<Finding> rows = List.of();
 
         void setRows(List<Finding> rows) {
             this.rows = rows == null ? List.of() : rows;
             fireTableDataChanged();
+        }
+
+        List<Finding> rowsSnapshot() {
+            return new ArrayList<>(rows);
         }
 
         Finding getAt(int row) {
@@ -602,9 +850,10 @@ public class ClientSideEyeTab extends JPanel {
                 case 1 -> String.valueOf(f.confidence());
                 case 2 -> isFalsePositive(f) ? "yes" : "";
                 case 3 -> f.type();
-                case 4 -> f.host();
-                case 5 -> f.title();
-                case 6 -> f.url();
+                case 4 -> findingArea(f);
+                case 5 -> f.host();
+                case 6 -> f.title();
+                case 7 -> f.url();
                 default -> "";
             };
         }
