@@ -102,6 +102,22 @@ The popup now requires a per-session **Bridge Token** from the Burp extension ta
 
 The build also refreshes the top-level `ClientSideEye-Burp.jar` file for easy loading into Burp.
 
+## Screenshots
+
+Burp findings view:
+
+<img width="1501" height="855" alt="ClientSideEye findings view" src="https://github.com/user-attachments/assets/e3b67ed3-7893-4cf0-84a0-a0c50a0b4a99" />
+
+Browser validation dialog:
+
+<img width="901" height="553" alt="ClientSideEye browser validation dialog" src="https://github.com/user-attachments/assets/8ecc53e8-7bb3-4c67-b7cb-1c46e8870c54" />
+
+## CI and Releases
+
+- GitHub Actions runs `./gradlew clean check jar` on pushes and pull requests
+- Version tags matching `v*.*.*` publish GitHub releases with both the root jar and versioned jar attached
+- Local release workflow is available through `./scripts/release.sh`
+
 ## Usage
 
 1. Browse the target application normally
@@ -111,7 +127,6 @@ The build also refreshes the top-level `ClientSideEye-Burp.jar` file for easy lo
 3. Click **Analyze Site Map (Quick)** or use right-click send-to from Proxy/HTTP History
 
 4. Triage findings by Severity and Confidence
-<img width="1501" height="855" alt="image" src="https://github.com/user-attachments/assets/e3b67ed3-7893-4cf0-84a0-a0c50a0b4a99" />
 
 Notes:
 - `Host filter` now also scopes Site Map scans when set.
@@ -121,7 +136,7 @@ Notes:
 - JavaScript assets with `sourceMappingURL` comments and exposed `.js.map` responses are analyzed for extra client-side attack surface.
 
 5. Use View in Browser to validate findings
-<img width="901" height="553" alt="image" src="https://github.com/user-attachments/assets/8ecc53e8-7bb3-4c67-b7cb-1c46e8870c54" />
+
 ### Validating Findings in the Browser
 
 For each finding, ClientSideEye provides browser-friendly **Find Hints** to help you quickly locate the affected element in the DOM.
