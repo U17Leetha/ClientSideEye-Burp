@@ -18,12 +18,12 @@ import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GraphicsEnvironment;
-import java.awt.Rectangle;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.util.function.Consumer;
 
 final class ViewInBrowserDialog {
@@ -105,19 +105,27 @@ final class ViewInBrowserDialog {
             api.logging().logToOutput("[ClientSideEye] Copied validation guidance to clipboard.");
         });
 
-        c.gridx = 0; c.gridy = 0; c.weightx = 0;
+        c.gridx = 0;
+        c.gridy = 0;
+        c.weightx = 0;
         panel.add(new JLabel("URL:"), c);
-        c.gridx = 1; c.weightx = 1;
+        c.gridx = 1;
+        c.weightx = 1;
         panel.add(urlField, c);
-        c.gridx = 2; c.weightx = 0;
+        c.gridx = 2;
+        c.weightx = 0;
         panel.add(copyUrlButton, c);
 
         if (supportsDomWorkflows) {
-            c.gridx = 0; c.gridy = 1; c.weightx = 0;
+            c.gridx = 0;
+            c.gridy = 1;
+            c.weightx = 0;
             panel.add(new JLabel("Locate hint:"), c);
-            c.gridx = 1; c.weightx = 1;
+            c.gridx = 1;
+            c.weightx = 1;
             panel.add(hintCombo, c);
-            c.gridx = 2; c.weightx = 0;
+            c.gridx = 2;
+            c.weightx = 0;
             panel.add(copyLocateButton, c);
 
             addSnippetRow(panel, c, 2, "Highlight:", "Marks all likely matches in the page", copyHighlightButton);
@@ -138,15 +146,25 @@ final class ViewInBrowserDialog {
     }
 
     private static void addSnippetRow(JPanel panel, GridBagConstraints c, int row, String label, String description, JButton button) {
-        c.gridx = 0; c.gridy = row; c.weightx = 0;
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 0;
         panel.add(new JLabel(label), c);
-        c.gridx = 1; c.weightx = 1;
+        c.gridx = 1;
+        c.weightx = 1;
         panel.add(new JLabel(description), c);
-        c.gridx = 2; c.weightx = 0;
+        c.gridx = 2;
+        c.weightx = 0;
         panel.add(button, c);
     }
 
-    private static JScrollPane buildInstructionsPane(Finding finding, String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding, boolean supportsDomWorkflows) {
+    private static JScrollPane buildInstructionsPane(
+        Finding finding,
+        String evidence,
+        FindHintBuilder.Result hintResult,
+        boolean isDevtoolsFinding,
+        boolean supportsDomWorkflows
+    ) {
         JTextArea textArea = new JTextArea();
         textArea.setEditable(false);
         textArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
@@ -174,11 +192,22 @@ final class ViewInBrowserDialog {
         dialog.setSize(width, height);
     }
 
-    private static String buildInstructionsText(Finding finding, String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding, boolean supportsDomWorkflows) {
+    private static String buildInstructionsText(
+        Finding finding,
+        String evidence,
+        FindHintBuilder.Result hintResult,
+        boolean isDevtoolsFinding,
+        boolean supportsDomWorkflows
+    ) {
         String bypassSection = isDevtoolsFinding
             ? "DevTools bypass snippet (Console):\n" + DevtoolsBypassSnippets.script() + "\n"
                 + "Tip: If the app blocks on load, run the snippet as a DevTools Snippet and reload.\n\n"
             : "";
+        if (!supportsDomWorkflows) {
+            return FindingTypeGuidance.guidanceText(finding, hintResult).trim() + "\n\n"
+                + bypassSection
+                + "Evidence snippet:\n" + evidence + "\n";
+        }
         return """
             Recommended DevTools flow:
             1) Copy a Locate hint and paste it into the Console to identify the right node(s)
@@ -194,6 +223,4 @@ final class ViewInBrowserDialog {
             + bypassSection
             + "Evidence snippet:\n" + evidence + "\n";
     }
-
-
 }
