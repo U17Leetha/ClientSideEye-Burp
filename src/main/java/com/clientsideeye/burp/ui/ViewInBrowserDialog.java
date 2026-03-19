@@ -18,6 +18,8 @@ import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -49,6 +51,7 @@ final class ViewInBrowserDialog {
         dialog.add(buildInstructionsPane(evidence, hintResult, isDevtoolsFinding), BorderLayout.CENTER);
         dialog.add(buildFooter(dialog), BorderLayout.SOUTH);
         dialog.pack();
+        applyPreferredDialogSize(dialog);
         dialog.setLocationRelativeTo(api.userInterface().swingUtils().suiteFrame());
         dialog.setVisible(true);
     }
@@ -138,7 +141,7 @@ final class ViewInBrowserDialog {
         textArea.setText(buildInstructionsText(evidence, hintResult, isDevtoolsFinding));
         textArea.setCaretPosition(0);
         JScrollPane pane = new JScrollPane(textArea);
-        pane.setPreferredSize(new Dimension(920, 440));
+        pane.setPreferredSize(new Dimension(760, 420));
         return pane;
     }
 
@@ -148,6 +151,15 @@ final class ViewInBrowserDialog {
         closeButton.addActionListener(e -> dialog.dispose());
         panel.add(closeButton);
         return panel;
+    }
+
+    private static void applyPreferredDialogSize(JDialog dialog) {
+        Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        int preferredWidth = Math.min(900, bounds.width - 160);
+        int preferredHeight = Math.min(760, bounds.height - 120);
+        int width = Math.min(Math.max(dialog.getWidth(), 720), preferredWidth);
+        int height = Math.min(Math.max(dialog.getHeight(), 560), preferredHeight);
+        dialog.setSize(width, height);
     }
 
     private static String buildInstructionsText(String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding) {
