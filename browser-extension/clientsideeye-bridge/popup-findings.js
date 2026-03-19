@@ -282,12 +282,12 @@ window.ClientSideEyeFindings = (() => {
         if (!isInteresting) continue;
 
         const title = isGraphql
-          ? "Runtime GraphQL activity observed in browser"
+          ? "Runtime GraphQL endpoint observed in browser"
           : kind === "websocket"
             ? "Runtime WebSocket endpoint observed in browser"
             : kind === "eventsource"
               ? "Runtime EventSource endpoint observed in browser"
-              : "Runtime network endpoint observed in browser";
+              : "Runtime endpoint observed in browser";
         const evidence = `${method || kind} -> ${url}${body ? ` | body: ${body.slice(0, 120)}` : ""}`;
         pushFinding({
           url: location.href,
@@ -304,7 +304,7 @@ window.ClientSideEyeFindings = (() => {
                 ? 82
                 : 74,
           title,
-          summary: `The page context reported ${kind} activity during runtime instrumentation.`,
+          summary: `The frontend initiated or referenced ${kind} activity during page execution. This is attack-surface discovery and should be reviewed for unauthorized operations or data exposure.`,
           evidence: `${evidence.slice(0, 260)}${entry.headerNames?.length ? ` | headers: ${entry.headerNames.join(",")}` : ""}${entry.graphqlOp ? ` | graphql: ${entry.graphqlOp}` : ""}${entry.hasAuthHeader ? " | auth-header" : ""}`.slice(0, 320),
           identity: `runtime-hook|${kind}|${method}|${url}|${body.slice(0, 40)}`,
         });
@@ -335,8 +335,8 @@ window.ClientSideEyeFindings = (() => {
           severity:
             /\/admin\b|\/internal\b/.test(lower) || isGraphql ? "MEDIUM" : "INFO",
           confidence: isGraphql ? 82 : initiatorType === "fetch" ? 76 : 68,
-          title: "Runtime network endpoint observed in browser",
-          summary: `The browser observed a ${initiatorType || "resource"} request/reference during page execution.`,
+          title: isGraphql ? "Runtime GraphQL endpoint observed in browser" : "Runtime endpoint observed in browser",
+          summary: `The browser observed a ${initiatorType || "resource"} request or endpoint reference during page execution. This is attack-surface discovery rather than proof of a vulnerability by itself.`,
           evidence: `${initiatorType || "resource"} -> ${name}`,
           identity: `runtime-network|${initiatorType}|${name}`,
         });

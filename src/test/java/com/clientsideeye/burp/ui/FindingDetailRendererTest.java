@@ -8,16 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FindingDetailRendererTest {
     @Test
-    void rendersExpectedSections() {
+    void rendersExpectedSectionsForDomFinding() {
         Finding finding = new Finding(
-            "DOM_XSS_SINK",
+            "HIDDEN_OR_DISABLED_CONTROL",
             HIGH,
             90,
             "https://example.com/admin",
             "example.com",
             "Dangerous sink",
             "summary text",
-            "evidence text",
+            "<button data-testid=\"save\" disabled>Save</button>",
             "recommendation text",
             "identity"
         );
@@ -28,9 +28,10 @@ class FindingDetailRendererTest {
         assertTrue(rendered.contains("Severity: HIGH (90)"));
         assertTrue(rendered.contains("False positive: yes"));
         assertTrue(rendered.contains("Area: /admin"));
-        assertTrue(rendered.contains("Evidence\n--------\nevidence text"));
+        assertTrue(rendered.contains("Evidence\n--------\n<button data-testid=\"save\" disabled>Save</button>"));
         assertTrue(rendered.contains("Summary\n-------\nsummary text"));
         assertTrue(rendered.contains("DevTools Usage"));
+        assertTrue(rendered.contains("Reveal / unhide snippet"));
         assertTrue(rendered.contains("Recommendation\n--------------\nrecommendation text"));
     }
 }

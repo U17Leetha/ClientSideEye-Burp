@@ -33,6 +33,7 @@ final class ViewInBrowserDialog {
     static void show(MontoyaApi api, Finding finding, Consumer<String> clipboardWriter) {
         String evidence = finding.evidence();
         boolean isDevtoolsFinding = FindingType.DEVTOOLS_BLOCKING.name().equals(finding.type());
+        boolean supportsDomWorkflows = FindingTypeGuidance.supportsDomWorkflows(finding);
         FindHintBuilder.Result hintResult = FindHintBuilder.build(evidence);
 
         DefaultComboBoxModel<String> hintModel = new DefaultComboBoxModel<>();
@@ -47,8 +48,8 @@ final class ViewInBrowserDialog {
         );
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setLayout(new BorderLayout(10, 10));
-        dialog.add(buildTopPanel(api, finding.url(), hintCombo, hintResult, isDevtoolsFinding, clipboardWriter), BorderLayout.NORTH);
-        dialog.add(buildInstructionsPane(evidence, hintResult, isDevtoolsFinding), BorderLayout.CENTER);
+        dialog.add(buildTopPanel(api, finding, hintCombo, hintResult, isDevtoolsFinding, supportsDomWorkflows, clipboardWriter), BorderLayout.NORTH);
+        dialog.add(buildInstructionsPane(finding, evidence, hintResult, isDevtoolsFinding, supportsDomWorkflows), BorderLayout.CENTER);
         dialog.add(buildFooter(dialog), BorderLayout.SOUTH);
         dialog.pack();
         applyPreferredDialogSize(dialog);
@@ -58,10 +59,11 @@ final class ViewInBrowserDialog {
 
     private static JPanel buildTopPanel(
         MontoyaApi api,
-        String url,
+        Finding finding,
         JComboBox<String> hintCombo,
         FindHintBuilder.Result hintResult,
         boolean isDevtoolsFinding,
+        boolean supportsDomWorkflows,
         Consumer<String> clipboardWriter
     ) {
         JPanel panel = new JPanel(new GridBagLayout());
@@ -69,12 +71,12 @@ final class ViewInBrowserDialog {
         c.insets = new Insets(4, 4, 4, 4);
         c.fill = GridBagConstraints.HORIZONTAL;
 
-        JTextField urlField = new JTextField(url);
+        JTextField urlField = new JTextField(finding.url());
         urlField.setEditable(false);
 
         JButton copyUrlButton = new JButton("Copy URL");
         copyUrlButton.addActionListener(e -> {
-            clipboardWriter.accept(url);
+            clipboardWriter.accept(finding.url());
             api.logging().logToOutput("[ClientSideEye] Copied URL to clipboard.");
         });
 
@@ -97,6 +99,12 @@ final class ViewInBrowserDialog {
             api.logging().logToOutput("[ClientSideEye] Copied reveal snippet to clipboard.");
         });
 
+        JButton copyGuidanceButton = new JButton("Copy Validation Guidance");
+        copyGuidanceButton.addActionListener(e -> {
+            clipboardWriter.accept(FindingTypeGuidance.guidanceText(finding, hintResult).trim());
+            api.logging().logToOutput("[ClientSideEye] Copied validation guidance to clipboard.");
+        });
+
         c.gridx = 0; c.gridy = 0; c.weightx = 0;
         panel.add(new JLabel("URL:"), c);
         c.gridx = 1; c.weightx = 1;
@@ -104,15 +112,19 @@ final class ViewInBrowserDialog {
         c.gridx = 2; c.weightx = 0;
         panel.add(copyUrlButton, c);
 
-        c.gridx = 0; c.gridy = 1; c.weightx = 0;
-        panel.add(new JLabel("Locate hint:"), c);
-        c.gridx = 1; c.weightx = 1;
-        panel.add(hintCombo, c);
-        c.gridx = 2; c.weightx = 0;
-        panel.add(copyLocateButton, c);
+        if (supportsDomWorkflows) {
+            c.gridx = 0; c.gridy = 1; c.weightx = 0;
+            panel.add(new JLabel("Locate hint:"), c);
+            c.gridx = 1; c.weightx = 1;
+            panel.add(hintCombo, c);
+            c.gridx = 2; c.weightx = 0;
+            panel.add(copyLocateButton, c);
 
-        addSnippetRow(panel, c, 2, "Highlight:", "Marks all likely matches in the page", copyHighlightButton);
-        addSnippetRow(panel, c, 3, "Reveal / unhide:", "Unhides or re-enables the target and ancestors", copyRevealButton);
+            addSnippetRow(panel, c, 2, "Highlight:", "Marks all likely matches in the page", copyHighlightButton);
+            addSnippetRow(panel, c, 3, "Reveal / unhide:", "Unhides or re-enables the target and ancestors", copyRevealButton);
+        } else {
+            addSnippetRow(panel, c, 1, "Validation:", "Investigation and PoC guidance for this finding type", copyGuidanceButton);
+        }
 
         if (isDevtoolsFinding) {
             JButton copyBypassButton = new JButton("Copy DevTools Bypass Snippet");
@@ -120,7 +132,7 @@ final class ViewInBrowserDialog {
                 clipboardWriter.accept(DevtoolsBypassSnippets.script());
                 api.logging().logToOutput("[ClientSideEye] Copied DevTools bypass snippet to clipboard.");
             });
-            addSnippetRow(panel, c, 4, "Bypass:", "Neutralizes common DevTools detection hooks", copyBypassButton);
+            addSnippetRow(panel, c, supportsDomWorkflows ? 4 : 2, "Bypass:", "Neutralizes common DevTools detection hooks", copyBypassButton);
         }
         return panel;
     }
@@ -134,11 +146,11 @@ final class ViewInBrowserDialog {
         panel.add(button, c);
     }
 
-    private static JScrollPane buildInstructionsPane(String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding) {
+    private static JScrollPane buildInstructionsPane(Finding finding, String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding, boolean supportsDomWorkflows) {
         JTextArea textArea = new JTextArea();
         textArea.setEditable(false);
         textArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        textArea.setText(buildInstructionsText(evidence, hintResult, isDevtoolsFinding));
+        textArea.setText(buildInstructionsText(finding, evidence, hintResult, isDevtoolsFinding, supportsDomWorkflows));
         textArea.setCaretPosition(0);
         JScrollPane pane = new JScrollPane(textArea);
         pane.setPreferredSize(new Dimension(760, 420));
@@ -162,7 +174,7 @@ final class ViewInBrowserDialog {
         dialog.setSize(width, height);
     }
 
-    private static String buildInstructionsText(String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding) {
+    private static String buildInstructionsText(Finding finding, String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding, boolean supportsDomWorkflows) {
         String bypassSection = isDevtoolsFinding
             ? "DevTools bypass snippet (Console):\n" + DevtoolsBypassSnippets.script() + "\n"
                 + "Tip: If the app blocks on load, run the snippet as a DevTools Snippet and reload.\n\n"
