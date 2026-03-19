@@ -1,0 +1,8 @@
+.DS_Store
+.gradle/
+build/
+out/
+*.class
+*.log
+ClientSideEye-Burp/
+ClientSideEye-Burp-0.1.0.jar
