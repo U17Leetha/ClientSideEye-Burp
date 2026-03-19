@@ -3,6 +3,18 @@
 ClientSideEye is a Burp Suite extension for identifying **client-side security anti-patterns**
 such as hidden/disabled privileged controls and passwords rendered in HTML responses.
 
+## Architecture
+
+The codebase is intentionally split into a few focused layers:
+
+- `ClientSideEyeExtension`: Burp entrypoint, menu registration, lifecycle, and bridge startup
+- `core/`: static analyzers and finding/export models for HTML, JavaScript, source maps, and shared response analysis
+- `integration/`: localhost browser bridge handling and browser-submitted finding normalization
+- `ui/`: Burp Swing tab, filter state, table models, DevTools hint generation, and browser-view workflows
+- `browser-extension/clientsideeye-bridge/`: companion browser helper for quick/deep runtime collection and bridge submission
+
+Operationally, `Quick` paths favor lightweight static and current-DOM analysis, while `Deep` paths add temporary runtime instrumentation for SPA behavior and live network activity.
+
 ## Quick Start (60 seconds)
 
 1. Build and load extension JAR in Burp:
@@ -31,7 +43,7 @@ ClientSideEye includes a companion Chromium browser extension in:
 
 Load it as an unpacked extension, then click:
 
-- `Scan Current Tab + Send to ClientSideEye`
+- `Quick Scan + Send or Deep Scan (15s Runtime) + Send`
 
 The popup should show:
 
@@ -84,7 +96,7 @@ The popup now requires a per-session **Bridge Token** from the Burp extension ta
 
 2. Open the ClientSideEye tab
 
-3. Click **Analyze Site Map (in-scope)** or use right-click send-to from Proxy/HTTP History
+3. Click **Analyze Site Map (Quick)** or use right-click send-to from Proxy/HTTP History
 
 4. Triage findings by Severity and Confidence
 <img width="1501" height="855" alt="image" src="https://github.com/user-attachments/assets/e3b67ed3-7893-4cf0-84a0-a0c50a0b4a99" />
