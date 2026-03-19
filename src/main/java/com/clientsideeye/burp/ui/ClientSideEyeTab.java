@@ -77,178 +77,161 @@ public class ClientSideEyeTab extends JPanel {
 
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // Top controls
+        JButton analyzeSiteMapButton = new JButton("Analyze Site Map (Quick)");
+        JButton exportButton = new JButton("Export JSON…");
+        JButton viewButton = new JButton("View in Browser…");
+        JButton clearButton = new JButton("Clear Findings");
+        JButton copyTokenButton = new JButton("Copy Bridge Token");
+
+        configureMenus();
+        configureTable();
+        add(buildControlsPanel(analyzeSiteMapButton, exportButton, viewButton, clearButton, copyTokenButton), BorderLayout.NORTH);
+        add(buildContentSplitPane(), BorderLayout.CENTER);
+        bindListeners(analyzeSiteMapButton, exportButton, viewButton, clearButton, copyTokenButton);
+        refreshTable();
+    }
+
+    private void configureMenus() {
+        configurePopupMenu(typeMenu, typeMenuButton, filterTypePassword, filterTypeHidden, filterTypeRole,
+            filterTypeInline, filterTypeDevtools, filterTypeEndpoint, filterTypeDomXss, filterTypePostMessage,
+            filterTypeStorage, filterTypeSourceMap, filterTypeRuntimeNetwork);
+        configurePopupMenu(severityMenu, severityMenuButton, filterHigh, filterMedium, filterLow, filterInfo);
+    }
+
+    private void configurePopupMenu(JPopupMenu menu, JButton button, JMenuItem... items) {
+        for (JMenuItem item : items) {
+            menu.add(item);
+        }
+        button.addActionListener(e -> menu.show(button, 0, button.getHeight()));
+    }
+
+    private JPanel buildControlsPanel(
+        JButton analyzeSiteMapButton,
+        JButton exportButton,
+        JButton viewButton,
+        JButton clearButton,
+        JButton copyTokenButton
+    ) {
         JPanel controls = new JPanel(new GridBagLayout());
+        GridBagConstraints c = defaultConstraints();
+
+        addControlRowOne(controls, c, analyzeSiteMapButton, exportButton, viewButton, clearButton);
+        addControlRowTwo(controls, c, copyTokenButton);
+        addControlRowThree(controls, c);
+        return controls;
+    }
+
+    private GridBagConstraints defaultConstraints() {
         GridBagConstraints c = new GridBagConstraints();
         c.insets = new Insets(4, 4, 4, 4);
         c.fill = GridBagConstraints.HORIZONTAL;
+        return c;
+    }
 
-        c.gridx = 0; c.gridy = 0; c.weightx = 0;
-        controls.add(new JLabel("Host filter:"), c);
+    private void addControlRowOne(
+        JPanel controls,
+        GridBagConstraints c,
+        JButton analyzeSiteMapButton,
+        JButton exportButton,
+        JButton viewButton,
+        JButton clearButton
+    ) {
+        addControl(controls, c, 0, 0, 0, 1, new JLabel("Host filter:"));
+        addControl(controls, c, 1, 0, 1, 1, filterHost);
+        addControl(controls, c, 2, 0, 0, 1, new JLabel("Search:"));
+        addControl(controls, c, 3, 0, 1, 1, filterSearch);
+        addControl(controls, c, 4, 0, 0, 1, new JLabel("Type:"));
+        addControl(controls, c, 5, 0, 0.5, 1, typeMenuButton);
+        addControl(controls, c, 6, 0, 0, 1, new JLabel("Severity:"));
+        addControl(controls, c, 7, 0, 0, 1, severityMenuButton);
+        addControl(controls, c, 8, 0, 0, 1, filterFalsePositive);
+        addControl(controls, c, 9, 0, 0, 1, analyzeSiteMapButton);
+        addControl(controls, c, 10, 0, 0, 1, exportButton);
+        addControl(controls, c, 11, 0, 0, 1, viewButton);
+        addControl(controls, c, 12, 0, 0, 1, clearButton);
+    }
 
-        c.gridx = 1; c.gridy = 0; c.weightx = 1;
-        controls.add(filterHost, c);
-
-        c.gridx = 2; c.gridy = 0; c.weightx = 0;
-        controls.add(new JLabel("Search:"), c);
-
-        c.gridx = 3; c.gridy = 0; c.weightx = 1;
-        controls.add(filterSearch, c);
-
-        c.gridx = 4; c.gridy = 0; c.weightx = 0;
-        controls.add(new JLabel("Type:"), c);
-
-        typeMenu.add(filterTypePassword);
-        typeMenu.add(filterTypeHidden);
-        typeMenu.add(filterTypeRole);
-        typeMenu.add(filterTypeInline);
-        typeMenu.add(filterTypeDevtools);
-        typeMenu.add(filterTypeEndpoint);
-        typeMenu.add(filterTypeDomXss);
-        typeMenu.add(filterTypePostMessage);
-        typeMenu.add(filterTypeStorage);
-        typeMenu.add(filterTypeSourceMap);
-        typeMenu.add(filterTypeRuntimeNetwork);
-        typeMenuButton.addActionListener(e ->
-                typeMenu.show(typeMenuButton, 0, typeMenuButton.getHeight()));
-
-        c.gridx = 5; c.gridy = 0; c.weightx = 0.5;
-        controls.add(typeMenuButton, c);
-
-        c.gridx = 6; c.gridy = 0; c.weightx = 0;
-        controls.add(new JLabel("Severity:"), c);
-
-        severityMenu.add(filterHigh);
-        severityMenu.add(filterMedium);
-        severityMenu.add(filterLow);
-        severityMenu.add(filterInfo);
-        severityMenuButton.addActionListener(e ->
-                severityMenu.show(severityMenuButton, 0, severityMenuButton.getHeight()));
-
-        c.gridx = 7; c.gridy = 0; c.weightx = 0.0;
-        controls.add(severityMenuButton, c);
-        c.gridx = 8; c.gridy = 0; c.weightx = 0.0;
-        controls.add(filterFalsePositive, c);
-
-        JButton btnAnalyzeSiteMap = new JButton("Analyze Site Map (Quick)");
-        JButton btnExport = new JButton("Export JSON…");
-        JButton btnView = new JButton("View in Browser…");
-        JButton btnPurge = new JButton("Clear Findings");
-        JButton btnCopyToken = new JButton("Copy Bridge Token");
-
-        c.gridx = 9; c.gridy = 0; c.weightx = 0;
-        controls.add(btnAnalyzeSiteMap, c);
-        c.gridx = 10; controls.add(btnExport, c);
-        c.gridx = 11; controls.add(btnView, c);
-        c.gridx = 12; controls.add(btnPurge, c);
-
+    private void addControlRowTwo(JPanel controls, GridBagConstraints c, JButton copyTokenButton) {
         bridgeEndpointField.setEditable(false);
         bridgeTokenField.setEditable(false);
 
-        c.gridx = 0; c.gridy = 1; c.weightx = 0;
-        controls.add(new JLabel("Bridge:"), c);
-        c.gridx = 1; c.gridy = 1; c.gridwidth = 4; c.weightx = 1;
-        controls.add(bridgeEndpointField, c);
-        c.gridx = 5; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
-        controls.add(new JLabel("Token:"), c);
-        c.gridx = 6; c.gridy = 1; c.gridwidth = 4; c.weightx = 1;
-        controls.add(bridgeTokenField, c);
-        c.gridx = 10; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
-        controls.add(btnCopyToken, c);
-        c.gridx = 11; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
-        controls.add(new JLabel("Scan limit:"), c);
-        c.gridx = 12; c.gridy = 1; c.gridwidth = 1; c.weightx = 0;
-        controls.add(scanLimitSpinner, c);
+        addControl(controls, c, 0, 1, 0, 1, new JLabel("Bridge:"));
+        addControl(controls, c, 1, 1, 1, 4, bridgeEndpointField);
+        addControl(controls, c, 5, 1, 0, 1, new JLabel("Token:"));
+        addControl(controls, c, 6, 1, 1, 4, bridgeTokenField);
+        addControl(controls, c, 10, 1, 0, 1, copyTokenButton);
+        addControl(controls, c, 11, 1, 0, 1, new JLabel("Scan limit:"));
+        addControl(controls, c, 12, 1, 0, 1, scanLimitSpinner);
+    }
 
-        c.gridx = 0; c.gridy = 2; c.gridwidth = 3; c.weightx = 0;
-        controls.add(exportVisibleOnly, c);
-        c.gridx = 3; c.gridy = 2; c.gridwidth = 10; c.weightx = 1;
-        controls.add(new JLabel("Host filter also scopes Site Map scans when set."), c);
+    private void addControlRowThree(JPanel controls, GridBagConstraints c) {
+        addControl(controls, c, 0, 2, 0, 3, exportVisibleOnly);
+        addControl(controls, c, 3, 2, 1, 10, new JLabel("Host filter also scopes Site Map scans when set."));
+    }
 
-        add(controls, BorderLayout.NORTH);
+    private void addControl(
+        JPanel panel,
+        GridBagConstraints c,
+        int x,
+        int y,
+        double weightX,
+        int gridWidth,
+        Component component
+    ) {
+        c.gridx = x;
+        c.gridy = y;
+        c.weightx = weightX;
+        c.gridwidth = gridWidth;
+        panel.add(component, c);
+    }
 
-        // Table + detail
-        table.setModel(tableModel);
-        table.setRowSorter(sorter);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-
-        // Row highlighting
-        table.setDefaultRenderer(Object.class, new SeverityRowRenderer(tableModel));
-
+    private JSplitPane buildContentSplitPane() {
         JScrollPane tableScroll = new JScrollPane(table);
-
         detailArea.setEditable(false);
         detailArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JScrollPane detailScroll = new JScrollPane(detailArea);
-
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tableScroll, detailScroll);
         split.setResizeWeight(0.6);
-        add(split, BorderLayout.CENTER);
+        return split;
+    }
 
-        // sorter
+    private void configureTable() {
+        table.setModel(tableModel);
+        table.setRowSorter(sorter);
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        table.setDefaultRenderer(Object.class, new SeverityRowRenderer(tableModel));
         sorter.setComparator(0, (a, b) -> severityRank((String) a) - severityRank((String) b));
         sorter.setComparator(1, Comparator.comparingInt(o -> Integer.parseInt(String.valueOf(o))));
+        sorter.setSortKeys(defaultSortKeys());
+    }
 
-        // default sort: Severity desc then Confidence desc
-        sorter.setSortKeys(List.of(
-                new SortKey(0, SortOrder.DESCENDING),
-                new SortKey(1, SortOrder.DESCENDING)
-        ));
+    private List<SortKey> defaultSortKeys() {
+        return List.of(new SortKey(0, SortOrder.DESCENDING), new SortKey(1, SortOrder.DESCENDING));
+    }
 
-        // listeners
-        btnPurge.addActionListener(e -> clearFindings());
-        btnExport.addActionListener(e -> exportJson());
-        btnView.addActionListener(e -> showViewInBrowserDialog());
-        btnAnalyzeSiteMap.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
-        btnCopyToken.addActionListener(e -> copyBridgeToken());
+    private void bindListeners(
+        JButton analyzeSiteMapButton,
+        JButton exportButton,
+        JButton viewButton,
+        JButton clearButton,
+        JButton copyTokenButton
+    ) {
+        clearButton.addActionListener(e -> clearFindings());
+        exportButton.addActionListener(e -> exportJson());
+        viewButton.addActionListener(e -> showViewInBrowserDialog());
+        analyzeSiteMapButton.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
+        copyTokenButton.addActionListener(e -> copyBridgeToken());
         registerRefreshActions(
-                filterHigh,
-                filterMedium,
-                filterLow,
-                filterInfo,
-                filterFalsePositive,
-                filterTypePassword,
-                filterTypeHidden,
-                filterTypeRole,
-                filterTypeInline,
-                filterTypeDevtools,
-                filterTypeEndpoint,
-                filterTypeDomXss,
-                filterTypePostMessage,
-                filterTypeStorage,
-                filterTypeSourceMap,
-                filterTypeRuntimeNetwork
+            filterHigh, filterMedium, filterLow, filterInfo, filterFalsePositive,
+            filterTypePassword, filterTypeHidden, filterTypeRole, filterTypeInline, filterTypeDevtools,
+            filterTypeEndpoint, filterTypeDomXss, filterTypePostMessage, filterTypeStorage,
+            filterTypeSourceMap, filterTypeRuntimeNetwork
         );
         DocumentListener refreshListener = new RefreshDocumentListener();
         filterHost.getDocument().addDocumentListener(refreshListener);
         filterSearch.getDocument().addDocumentListener(refreshListener);
-
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (e.getValueIsAdjusting()) return;
-            int viewRow = table.getSelectedRow();
-            if (viewRow < 0) {
-                detailArea.setText("");
-                return;
-            }
-            int modelRow = table.convertRowIndexToModel(viewRow);
-            Finding f = tableModel.getAt(modelRow);
-            if (f == null) {
-                detailArea.setText("");
-                return;
-            }
-            detailArea.setText(renderFinding(f));
-            detailArea.setCaretPosition(0);
-        });
-
+        table.getSelectionModel().addListSelectionListener(e -> onFindingSelectionChanged(e.getValueIsAdjusting()));
         table.addMouseListener(new java.awt.event.MouseAdapter() {
-            private void maybeShowFindingMenu(java.awt.event.MouseEvent e) {
-                if (!e.isPopupTrigger() && !SwingUtilities.isRightMouseButton(e)) return;
-                int viewRow = table.rowAtPoint(e.getPoint());
-                if (viewRow < 0) return;
-                table.setRowSelectionInterval(viewRow, viewRow);
-                showFindingContextMenu(e.getComponent(), e.getX(), e.getY());
-            }
-
             @Override
             public void mousePressed(java.awt.event.MouseEvent e) {
                 maybeShowFindingMenu(e);
@@ -259,8 +242,31 @@ public class ClientSideEyeTab extends JPanel {
                 maybeShowFindingMenu(e);
             }
         });
+    }
 
-        refreshTable();
+    private void onFindingSelectionChanged(boolean adjusting) {
+        if (adjusting) {
+            return;
+        }
+        Finding finding = selectedFinding();
+        if (finding == null) {
+            detailArea.setText("");
+            return;
+        }
+        detailArea.setText(renderFinding(finding));
+        detailArea.setCaretPosition(0);
+    }
+
+    private void maybeShowFindingMenu(java.awt.event.MouseEvent e) {
+        if (!e.isPopupTrigger() && !SwingUtilities.isRightMouseButton(e)) {
+            return;
+        }
+        int viewRow = table.rowAtPoint(e.getPoint());
+        if (viewRow < 0) {
+            return;
+        }
+        table.setRowSelectionInterval(viewRow, viewRow);
+        showFindingContextMenu(e.getComponent(), e.getX(), e.getY());
     }
 
     // Called by extension (context menu / site map analysis)
@@ -353,38 +359,12 @@ public class ClientSideEyeTab extends JPanel {
     }
 
     private void refreshTable() {
-        String host = filterHost.getText().trim().toLowerCase(Locale.ROOT);
-        String search = filterSearch.getText().trim().toLowerCase(Locale.ROOT);
-        boolean showHigh = filterHigh.isSelected();
-        boolean showMedium = filterMedium.isSelected();
-        boolean showLow = filterLow.isSelected();
-        boolean showInfo = filterInfo.isSelected();
-        boolean showFalsePositives = filterFalsePositive.isSelected();
-        Set<String> allowedTypes = selectedTypes();
-
-        List<Finding> all = new ArrayList<>(findingsByKey.values());
-
-        List<Finding> filtered = all.stream()
-                .filter(f -> host.isEmpty() || f.host().toLowerCase(Locale.ROOT).contains(host))
-                .filter(f -> search.isEmpty() || matchesSearch(f, search))
-                .filter(f -> allowedTypes.contains(f.type()))
-                .filter(f -> {
-                    if (f.severity() == Severity.HIGH) return showHigh;
-                    if (f.severity() == Severity.MEDIUM) return showMedium;
-                    if (f.severity() == Severity.LOW) return showLow;
-                    return showInfo;
-                })
-                .filter(f -> showFalsePositives || !isFalsePositive(f))
-                .collect(Collectors.toList());
-
+        FindingFilterState filters = currentFilters();
+        List<Finding> filtered = new ArrayList<>(findingsByKey.values()).stream()
+            .filter(finding -> filters.matches(finding, isFalsePositive(finding), findingArea(finding)))
+            .collect(Collectors.toList());
         tableModel.setRows(filtered);
-
-        if (sorter != null) {
-            sorter.setSortKeys(List.of(
-                    new SortKey(0, SortOrder.DESCENDING),
-                    new SortKey(1, SortOrder.DESCENDING)
-            ));
-        }
+        sorter.setSortKeys(defaultSortKeys());
     }
 
     private void toggleFalsePositiveForSelection() {
@@ -498,13 +478,17 @@ public class ClientSideEyeTab extends JPanel {
         return decision[0] == JOptionPane.OK_OPTION;
     }
 
-    private boolean matchesSearch(Finding finding, String search) {
-        return finding.title().toLowerCase(Locale.ROOT).contains(search)
-                || finding.url().toLowerCase(Locale.ROOT).contains(search)
-                || finding.evidence().toLowerCase(Locale.ROOT).contains(search)
-                || finding.identity().toLowerCase(Locale.ROOT).contains(search)
-                || finding.type().toLowerCase(Locale.ROOT).contains(search)
-                || findingArea(finding).toLowerCase(Locale.ROOT).contains(search);
+    private FindingFilterState currentFilters() {
+        return new FindingFilterState(
+            filterHost.getText().trim().toLowerCase(Locale.ROOT),
+            filterSearch.getText().trim().toLowerCase(Locale.ROOT),
+            filterHigh.isSelected(),
+            filterMedium.isSelected(),
+            filterLow.isSelected(),
+            filterInfo.isSelected(),
+            filterFalsePositive.isSelected(),
+            selectedTypes()
+        );
     }
 
     private boolean scanHostMatches(String url) {
