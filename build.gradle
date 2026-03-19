@@ -25,11 +25,40 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    options.release = 17
+    options.compilerArgs.addAll([
+        '-Xlint:unchecked',
+        '-Xlint:deprecation',
+    ])
 }
 
 test {
     useJUnitPlatform()
 }
+
+def browserExtensionScripts = [
+    'browser-extension/clientsideeye-bridge/popup-bridge.js',
+    'browser-extension/clientsideeye-bridge/popup-runtime.js',
+    'browser-extension/clientsideeye-bridge/popup-findings.js',
+    'browser-extension/clientsideeye-bridge/popup.js',
+]
+
+def browserScriptChecks = browserExtensionScripts.collect { script ->
+    def taskName = 'verify' + script.tokenize('/').last().replaceAll(/[^A-Za-z0-9]/, ' ').split().collect { it.capitalize() }.join('')
+    tasks.register(taskName, Exec) {
+        group = 'verification'
+        description = "Checks ${script} for JavaScript syntax errors."
+        commandLine 'node', '--check', script
+    }
+}
+
+tasks.register('verifyBrowserExtensionScripts') {
+    group = 'verification'
+    description = 'Checks browser extension scripts for JavaScript syntax errors.'
+    dependsOn(browserScriptChecks)
+}
+
+check.dependsOn(tasks.named('verifyBrowserExtensionScripts'))
 
 jar {
     archiveBaseName = "ClientSideEye-Burp"

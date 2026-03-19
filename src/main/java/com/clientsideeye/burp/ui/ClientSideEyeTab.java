@@ -39,9 +39,9 @@ public class ClientSideEyeTab extends JPanel {
     private final LinkedHashMap<String, Finding> findingsByKey = new LinkedHashMap<>();
     private final Set<String> falsePositiveKeys = new HashSet<>();
 
-    private final FindingsTableModel tableModel = new FindingsTableModel();
-    private final JTable table = new JTable(tableModel);
-    private TableRowSorter<FindingsTableModel> sorter;
+    private final FindingsTableModel tableModel = new FindingsTableModel(this::isFalsePositive, this::findingArea);
+    private final JTable table = new JTable();
+    private final TableRowSorter<FindingsTableModel> sorter = new TableRowSorter<>(tableModel);
 
     private final JTextArea detailArea = new JTextArea();
     private final JTextField filterHost = new JTextField();
@@ -171,8 +171,9 @@ public class ClientSideEyeTab extends JPanel {
         add(controls, BorderLayout.NORTH);
 
         // Table + detail
+        table.setModel(tableModel);
+        table.setRowSorter(sorter);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setAutoCreateRowSorter(true);
 
         // Row highlighting
         table.setDefaultRenderer(Object.class, new SeverityRowRenderer(tableModel));
@@ -188,7 +189,6 @@ public class ClientSideEyeTab extends JPanel {
         add(split, BorderLayout.CENTER);
 
         // sorter
-        sorter = (TableRowSorter<FindingsTableModel>) table.getRowSorter();
         sorter.setComparator(0, (a, b) -> severityRank((String) a) - severityRank((String) b));
         sorter.setComparator(1, Comparator.comparingInt(o -> Integer.parseInt(String.valueOf(o))));
 
@@ -199,52 +199,30 @@ public class ClientSideEyeTab extends JPanel {
         ));
 
         // listeners
-        btnPurge.addActionListener(e -> {
-            findingsByKey.clear();
-            falsePositiveKeys.clear();
-            refreshTable();
-            detailArea.setText("");
-        });
-
+        btnPurge.addActionListener(e -> clearFindings());
         btnExport.addActionListener(e -> exportJson());
         btnView.addActionListener(e -> showViewInBrowserDialog());
         btnAnalyzeSiteMap.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
-        btnCopyToken.addActionListener(e -> {
-            copyToClipboard(bridgeTokenField.getText());
-            api.logging().logToOutput("[ClientSideEye] Copied browser bridge token to clipboard.");
-        });
-        filterHigh.addActionListener(e -> refreshTable());
-        filterMedium.addActionListener(e -> refreshTable());
-        filterLow.addActionListener(e -> refreshTable());
-        filterInfo.addActionListener(e -> refreshTable());
-        filterFalsePositive.addActionListener(e -> refreshTable());
-        filterTypePassword.addActionListener(e -> refreshTable());
-        filterTypeHidden.addActionListener(e -> refreshTable());
-        filterTypeRole.addActionListener(e -> refreshTable());
-        filterTypeInline.addActionListener(e -> refreshTable());
-        filterTypeDevtools.addActionListener(e -> refreshTable());
-        filterTypeEndpoint.addActionListener(e -> refreshTable());
-        filterTypeDomXss.addActionListener(e -> refreshTable());
-        filterTypePostMessage.addActionListener(e -> refreshTable());
-        filterTypeStorage.addActionListener(e -> refreshTable());
-        filterTypeSourceMap.addActionListener(e -> refreshTable());
-        filterTypeRuntimeNetwork.addActionListener(e -> refreshTable());
-        DocumentListener refreshListener = new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                refreshTable();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                refreshTable();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                refreshTable();
-            }
-        };
+        btnCopyToken.addActionListener(e -> copyBridgeToken());
+        registerRefreshActions(
+                filterHigh,
+                filterMedium,
+                filterLow,
+                filterInfo,
+                filterFalsePositive,
+                filterTypePassword,
+                filterTypeHidden,
+                filterTypeRole,
+                filterTypeInline,
+                filterTypeDevtools,
+                filterTypeEndpoint,
+                filterTypeDomXss,
+                filterTypePostMessage,
+                filterTypeStorage,
+                filterTypeSourceMap,
+                filterTypeRuntimeNetwork
+        );
+        DocumentListener refreshListener = new RefreshDocumentListener();
         filterHost.getDocument().addDocumentListener(refreshListener);
         filterSearch.getDocument().addDocumentListener(refreshListener);
 
@@ -347,21 +325,11 @@ public class ClientSideEyeTab extends JPanel {
                 String body = rr.response().bodyToString();
                 if (body == null || body.isBlank()) continue;
 
-                String url = rr.request().url();
-                boolean htmlLike = HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body);
-                boolean jsLike = JavaScriptAnalyzer.looksLikeJavaScriptForAnalysis(url, body);
-                boolean sourceMapLike = SourceMapAnalyzer.looksLikeSourceMap(url, body);
-                if (!htmlLike && !jsLike && !sourceMapLike) {
+                List<Finding> f = analyzeResponse(rr.request().url(), body);
+                if (f.isEmpty()) {
                     skippedNonAnalyzable++;
                     continue;
                 }
-                List<Finding> f = new ArrayList<>();
-                if (htmlLike) f.addAll(HtmlAnalyzer.analyzeHtml(url, body));
-                if (jsLike) {
-                    f.addAll(JavaScriptAnalyzer.analyzeJavaScript(url, body));
-                    f.addAll(SourceMapAnalyzer.analyzeSourceMappingReference(url, body));
-                }
-                if (sourceMapLike) f.addAll(SourceMapAnalyzer.analyzeSourceMap(url, body));
                 analyzed++;
                 if (!f.isEmpty()) {
                     added += f.size();
@@ -372,6 +340,71 @@ public class ClientSideEyeTab extends JPanel {
             api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + analyzed + " | Findings added: " + added + " | Skipped (non-analyzable): " + skippedNonAnalyzable + " | Skipped (scan cap): " + skippedByCap + " | Host scope: " + currentScanHostScope());
         } catch (Exception e) {
             api.logging().logToError("[ClientSideEye] Site Map analyze error: " + e);
+        }
+    }
+
+    private void clearFindings() {
+        findingsByKey.clear();
+        falsePositiveKeys.clear();
+        refreshTable();
+        detailArea.setText("");
+    }
+
+    private void copyBridgeToken() {
+        copyToClipboard(bridgeTokenField.getText());
+        api.logging().logToOutput("[ClientSideEye] Copied browser bridge token to clipboard.");
+    }
+
+    private void registerRefreshActions(AbstractButton... buttons) {
+        for (AbstractButton button : buttons) {
+            button.addActionListener(e -> refreshTable());
+        }
+    }
+
+    private Finding selectedFinding() {
+        int viewRow = table.getSelectedRow();
+        if (viewRow < 0) {
+            return null;
+        }
+        return tableModel.getAt(table.convertRowIndexToModel(viewRow));
+    }
+
+    private List<Finding> analyzeResponse(String url, String body) {
+        boolean htmlLike = HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body);
+        boolean jsLike = JavaScriptAnalyzer.looksLikeJavaScriptForAnalysis(url, body);
+        boolean sourceMapLike = SourceMapAnalyzer.looksLikeSourceMap(url, body);
+        if (!htmlLike && !jsLike && !sourceMapLike) {
+            return List.of();
+        }
+
+        List<Finding> findings = new ArrayList<>();
+        if (htmlLike) {
+            findings.addAll(HtmlAnalyzer.analyzeHtml(url, body));
+        }
+        if (jsLike) {
+            findings.addAll(JavaScriptAnalyzer.analyzeJavaScript(url, body));
+            findings.addAll(SourceMapAnalyzer.analyzeSourceMappingReference(url, body));
+        }
+        if (sourceMapLike) {
+            findings.addAll(SourceMapAnalyzer.analyzeSourceMap(url, body));
+        }
+        return findings;
+    }
+
+    private final class RefreshDocumentListener implements DocumentListener {
+        @Override
+        public void insertUpdate(DocumentEvent e) {
+            refreshTable();
+        }
+
+        @Override
+        public void removeUpdate(DocumentEvent e) {
+            refreshTable();
+        }
+
+        @Override
+        public void changedUpdate(DocumentEvent e) {
+            refreshTable();
         }
     }
 
@@ -411,14 +444,11 @@ public class ClientSideEyeTab extends JPanel {
     }
 
     private void toggleFalsePositiveForSelection() {
-        int viewRow = table.getSelectedRow();
-        if (viewRow < 0) {
+        Finding f = selectedFinding();
+        if (f == null) {
             JOptionPane.showMessageDialog(api.userInterface().swingUtils().suiteFrame(), "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        int modelRow = table.convertRowIndexToModel(viewRow);
-        Finding f = tableModel.getAt(modelRow);
-        if (f == null) return;
 
         String key = f.stableKey();
         if (falsePositiveKeys.contains(key)) {
@@ -471,14 +501,11 @@ public class ClientSideEyeTab extends JPanel {
     }
 
     private void showViewInBrowserDialog() {
-        int viewRow = table.getSelectedRow();
-        if (viewRow < 0) {
+        Finding f = selectedFinding();
+        if (f == null) {
             JOptionPane.showMessageDialog(api.userInterface().swingUtils().suiteFrame(), "Select a finding first.", "ClientSideEye", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        int modelRow = table.convertRowIndexToModel(viewRow);
-        Finding f = tableModel.getAt(modelRow);
-        if (f == null) return;
 
         String url = f.url();
         String evidence = f.evidence();
@@ -748,34 +775,7 @@ public class ClientSideEyeTab extends JPanel {
     }
 
     private String findingArea(Finding finding) {
-        if (finding == null) return "general";
-        try {
-            java.net.URI uri = new java.net.URI(finding.url());
-            String path = uri.getPath();
-            if (path != null && !path.isBlank() && !"/".equals(path)) {
-                String[] parts = path.split("/");
-                List<String> keep = new ArrayList<>();
-                for (String part : parts) {
-                    if (part == null || part.isBlank()) continue;
-                    keep.add(part);
-                    if (keep.size() == 2) break;
-                }
-                if (!keep.isEmpty()) return "/" + String.join("/", keep);
-            }
-        } catch (Exception ignored) {
-            // fall back to identity/type-based grouping
-        }
-
-        String identity = finding.identity() == null ? "" : finding.identity();
-        if (!identity.isBlank()) {
-            String[] parts = identity.split("\\|");
-            for (String part : parts) {
-                if (part == null || part.isBlank()) continue;
-                if (part.startsWith("http")) continue;
-                return part.length() > 40 ? part.substring(0, 40) : part;
-            }
-        }
-        return finding.type().toLowerCase(Locale.ROOT);
+        return FindingAreaResolver.resolve(finding);
     }
 
     private String renderFinding(Finding f) {
@@ -816,102 +816,4 @@ public class ClientSideEyeTab extends JPanel {
         return types;
     }
 
-    // -------------------------
-    // Table model
-    // -------------------------
-    private class FindingsTableModel extends AbstractTableModel {
-
-        private final String[] cols = new String[]{"Severity", "Confidence", "FP", "Type", "Area", "Host", "Title", "URL"};
-        private List<Finding> rows = List.of();
-
-        void setRows(List<Finding> rows) {
-            this.rows = rows == null ? List.of() : rows;
-            fireTableDataChanged();
-        }
-
-        List<Finding> rowsSnapshot() {
-            return new ArrayList<>(rows);
-        }
-
-        Finding getAt(int row) {
-            if (row < 0 || row >= rows.size()) return null;
-            return rows.get(row);
-        }
-
-        @Override public int getRowCount() { return rows.size(); }
-        @Override public int getColumnCount() { return cols.length; }
-        @Override public String getColumnName(int column) { return cols[column]; }
-
-        @Override
-        public Object getValueAt(int rowIndex, int columnIndex) {
-            Finding f = rows.get(rowIndex);
-            return switch (columnIndex) {
-                case 0 -> f.severity().name();
-                case 1 -> String.valueOf(f.confidence());
-                case 2 -> isFalsePositive(f) ? "yes" : "";
-                case 3 -> f.type();
-                case 4 -> findingArea(f);
-                case 5 -> f.host();
-                case 6 -> f.title();
-                case 7 -> f.url();
-                default -> "";
-            };
-        }
-    }
-
-    // Row renderer to highlight risk
-    private class SeverityRowRenderer extends DefaultTableCellRenderer {
-        private final FindingsTableModel model;
-
-        SeverityRowRenderer(FindingsTableModel model) {
-            this.model = model;
-        }
-
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
-                                                       boolean hasFocus, int row, int column) {
-            Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-            if (isSelected) return c;
-
-            int modelRow = table.convertRowIndexToModel(row);
-            Finding f = model.getAt(modelRow);
-            if (f == null) return c;
-
-            Color bg = severityBackground(f.severity());
-
-            c.setBackground(bg);
-            c.setForeground(table.getForeground());
-            return c;
-        }
-    }
-
-    private Color severityBackground(Severity severity) {
-        Color base = UIManager.getColor("Table.background");
-        if (base == null) base = Color.WHITE;
-        Color accent = UIManager.getColor("Table.selectionBackground");
-        if (accent == null) accent = base.darker();
-
-        double blend = switch (severity) {
-            case HIGH -> 0.35;
-            case MEDIUM -> 0.25;
-            case LOW -> 0.12;
-            case INFO -> 0.06;
-        };
-        return blend(base, accent, blend);
-    }
-
-    private boolean isDarkTheme() {
-        Color bg = UIManager.getColor("Table.background");
-        if (bg == null) bg = Color.WHITE;
-        double luminance = (0.2126 * bg.getRed() + 0.7152 * bg.getGreen() + 0.0722 * bg.getBlue()) / 255.0;
-        return luminance < 0.45;
-    }
-
-    private Color blend(Color base, Color accent, double ratio) {
-        double r = Math.max(0.0, Math.min(1.0, ratio));
-        int red = (int) Math.round(base.getRed() * (1.0 - r) + accent.getRed() * r);
-        int green = (int) Math.round(base.getGreen() * (1.0 - r) + accent.getGreen() * r);
-        int blue = (int) Math.round(base.getBlue() * (1.0 - r) + accent.getBlue() * r);
-        return new Color(red, green, blue);
-    }
 }
