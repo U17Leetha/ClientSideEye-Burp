@@ -24,7 +24,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
-import javax.swing.JEditorPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.ListSelectionModel;
@@ -72,7 +72,7 @@ public class ClientSideEyeTab extends JPanel {
     private final JTable table = new JTable();
     private final TableRowSorter<FindingsTableModel> sorter = new TableRowSorter<>(tableModel);
 
-    private final JEditorPane detailArea = new JEditorPane();
+    private final JTextArea detailArea = new JTextArea();
     private final JTextField filterHost = new JTextField();
     private final JTextField filterSearch = new JTextField();
     private final JTextField bridgeEndpointField = new JTextField("Bridge not started");
@@ -213,9 +213,7 @@ public class ClientSideEyeTab extends JPanel {
     private JSplitPane buildContentSplitPane() {
         JScrollPane tableScroll = new JScrollPane(table);
         detailArea.setEditable(false);
-        detailArea.setContentType("text/html");
-        detailArea.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
-        detailArea.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        detailArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JScrollPane detailScroll = new JScrollPane(detailArea);
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tableScroll, detailScroll);
         split.setResizeWeight(0.62);
@@ -278,7 +276,7 @@ public class ClientSideEyeTab extends JPanel {
             detailArea.setText("");
             return;
         }
-        detailArea.setText(FindingDetailRenderer.renderHtml(finding, isFalsePositive(finding), findingArea(finding)));
+        detailArea.setText(FindingDetailRenderer.render(finding, isFalsePositive(finding), findingArea(finding)));
         detailArea.setCaretPosition(0);
     }
 
@@ -406,7 +404,7 @@ public class ClientSideEyeTab extends JPanel {
         }
 
         refreshTable();
-        detailArea.setText(FindingDetailRenderer.renderHtml(f, isFalsePositive(f), findingArea(f)));
+        detailArea.setText(FindingDetailRenderer.render(f, isFalsePositive(f), findingArea(f)));
         detailArea.setCaretPosition(0);
     }
 

@@ -24,11 +24,13 @@ class FindingDetailRendererTest {
 
         String rendered = FindingDetailRenderer.render(finding, true, "/admin");
 
+        assertTrue(rendered.contains("Title: Dangerous sink"));
         assertTrue(rendered.contains("Severity: HIGH (90)"));
         assertTrue(rendered.contains("False positive: yes"));
         assertTrue(rendered.contains("Area: /admin"));
-        assertTrue(rendered.contains("Summary:\nsummary text"));
-        assertTrue(rendered.contains("Evidence:\nevidence text"));
-        assertTrue(rendered.contains("Recommendation:\nrecommendation text"));
+        assertTrue(rendered.contains("Evidence\n--------\nevidence text"));
+        assertTrue(rendered.contains("Summary\n-------\nsummary text"));
+        assertTrue(rendered.contains("DevTools Usage"));
+        assertTrue(rendered.contains("Recommendation\n--------------\nrecommendation text"));
     }
 }
