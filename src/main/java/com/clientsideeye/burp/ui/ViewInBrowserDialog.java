@@ -77,7 +77,7 @@ final class ViewInBrowserDialog {
 
         JButton copyLocateButton = new JButton("Copy Locate Hint");
         copyLocateButton.addActionListener(e -> {
-            String hint = extractHint(String.valueOf(hintCombo.getSelectedItem()));
+            String hint = HintTextExtractor.extractExecutableText(String.valueOf(hintCombo.getSelectedItem()));
             clipboardWriter.accept(hint);
             api.logging().logToOutput("[ClientSideEye] Copied locate hint to clipboard.");
         });
@@ -171,11 +171,5 @@ final class ViewInBrowserDialog {
             + "Evidence snippet:\n" + evidence + "\n";
     }
 
-    private static String extractHint(String item) {
-        if (item == null) {
-            return "";
-        }
-        int idx = item.lastIndexOf(": ");
-        return idx >= 0 && idx + 2 < item.length() ? item.substring(idx + 2) : item;
-    }
+
 }

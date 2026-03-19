@@ -102,9 +102,7 @@ final class FindingDetailRenderer {
         if (result == null || result.hints == null || result.hints.isEmpty()) {
             return "";
         }
-        String item = result.hints.get(0);
-        int idx = item.indexOf(": ");
-        return idx >= 0 && idx + 2 < item.length() ? item.substring(idx + 2) : item;
+        return HintTextExtractor.extractExecutableText(result.hints.get(0));
     }
 
     private static String escapeHtml(String value) {
