@@ -75,11 +75,11 @@ final class ViewInBrowserDialog {
             api.logging().logToOutput("[ClientSideEye] Copied URL to clipboard.");
         });
 
-        JButton copyHintButton = new JButton("Copy selected Find Hint");
-        copyHintButton.addActionListener(e -> {
+        JButton copyLocateButton = new JButton("Copy Locate Hint");
+        copyLocateButton.addActionListener(e -> {
             String hint = extractHint(String.valueOf(hintCombo.getSelectedItem()));
             clipboardWriter.accept(hint);
-            api.logging().logToOutput("[ClientSideEye] Copied find hint to clipboard: " + hint);
+            api.logging().logToOutput("[ClientSideEye] Copied locate hint to clipboard.");
         });
 
         JButton copyHighlightButton = new JButton("Copy Highlight Snippet");
@@ -88,7 +88,7 @@ final class ViewInBrowserDialog {
             api.logging().logToOutput("[ClientSideEye] Copied highlight snippet to clipboard.");
         });
 
-        JButton copyRevealButton = new JButton("Copy Reveal Snippet");
+        JButton copyRevealButton = new JButton("Copy Reveal / Unhide Snippet");
         copyRevealButton.addActionListener(e -> {
             clipboardWriter.accept(hintResult.revealSnippet);
             api.logging().logToOutput("[ClientSideEye] Copied reveal snippet to clipboard.");
@@ -102,14 +102,14 @@ final class ViewInBrowserDialog {
         panel.add(copyUrlButton, c);
 
         c.gridx = 0; c.gridy = 1; c.weightx = 0;
-        panel.add(new JLabel("Find Hint:"), c);
+        panel.add(new JLabel("Locate hint:"), c);
         c.gridx = 1; c.weightx = 1;
         panel.add(hintCombo, c);
         c.gridx = 2; c.weightx = 0;
-        panel.add(copyHintButton, c);
+        panel.add(copyLocateButton, c);
 
-        addSnippetRow(panel, c, 2, "Highlight snippet:", copyHighlightButton);
-        addSnippetRow(panel, c, 3, "Reveal snippet:", copyRevealButton);
+        addSnippetRow(panel, c, 2, "Highlight:", "Marks all likely matches in the page", copyHighlightButton);
+        addSnippetRow(panel, c, 3, "Reveal / unhide:", "Unhides or re-enables the target and ancestors", copyRevealButton);
 
         if (isDevtoolsFinding) {
             JButton copyBypassButton = new JButton("Copy DevTools Bypass Snippet");
@@ -117,16 +117,16 @@ final class ViewInBrowserDialog {
                 clipboardWriter.accept(DevtoolsBypassSnippets.script());
                 api.logging().logToOutput("[ClientSideEye] Copied DevTools bypass snippet to clipboard.");
             });
-            addSnippetRow(panel, c, 4, "Bypass snippet:", copyBypassButton);
+            addSnippetRow(panel, c, 4, "Bypass:", "Neutralizes common DevTools detection hooks", copyBypassButton);
         }
         return panel;
     }
 
-    private static void addSnippetRow(JPanel panel, GridBagConstraints c, int row, String label, JButton button) {
+    private static void addSnippetRow(JPanel panel, GridBagConstraints c, int row, String label, String description, JButton button) {
         c.gridx = 0; c.gridy = row; c.weightx = 0;
         panel.add(new JLabel(label), c);
         c.gridx = 1; c.weightx = 1;
-        panel.add(new JLabel("Use Console in Chrome/Firefox"), c);
+        panel.add(new JLabel(description), c);
         c.gridx = 2; c.weightx = 0;
         panel.add(button, c);
     }
@@ -138,7 +138,7 @@ final class ViewInBrowserDialog {
         textArea.setText(buildInstructionsText(evidence, hintResult, isDevtoolsFinding));
         textArea.setCaretPosition(0);
         JScrollPane pane = new JScrollPane(textArea);
-        pane.setPreferredSize(new Dimension(900, 420));
+        pane.setPreferredSize(new Dimension(920, 440));
         return pane;
     }
 
@@ -153,21 +153,20 @@ final class ViewInBrowserDialog {
     private static String buildInstructionsText(String evidence, FindHintBuilder.Result hintResult, boolean isDevtoolsFinding) {
         String bypassSection = isDevtoolsFinding
             ? "DevTools bypass snippet (Console):\n" + DevtoolsBypassSnippets.script() + "\n"
-                + "Tip: If the app blocks on load, run the snippet as a DevTools Snippet and reload.\n"
+                + "Tip: If the app blocks on load, run the snippet as a DevTools Snippet and reload.\n\n"
             : "";
         return """
-            DevTools usage (Chrome/Firefox):
-            1) Open the page in your browser
-            2) Start with a Locate hint in the Console to enumerate matches
-            3) Use the Highlight snippet to visibly mark the match(es)
-            4) Use the Reveal snippet to unhide / re-enable the target when needed
-            5) Elements/Inspector: Cmd/Ctrl+F also works with CSS or text hints
+            Recommended DevTools flow:
+            1) Copy a Locate hint and paste it into the Console to identify the right node(s)
+            2) Copy the Highlight snippet to visually confirm the match on the page
+            3) Copy the Reveal / Unhide snippet when you need to re-enable a hidden or disabled control
+            4) Use Elements / Inspector search (Cmd/Ctrl+F) with the same selector or text hint if needed
 
             Highlight snippet (Console):
             """
             + hintResult.highlightSnippet + "\n\n"
-            + "Reveal/unhide snippet (Console):\n"
-            + hintResult.revealSnippet + "\n"
+            + "Reveal / unhide snippet (Console):\n"
+            + hintResult.revealSnippet + "\n\n"
             + bypassSection
             + "Evidence snippet:\n" + evidence + "\n";
     }

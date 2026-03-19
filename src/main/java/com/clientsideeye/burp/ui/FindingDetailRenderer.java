@@ -23,4 +23,61 @@ final class FindingDetailRenderer {
             + "\n"
             + "Recommendation:\n" + finding.recommendation() + "\n";
     }
+
+    static String renderHtml(Finding finding, boolean falsePositive, String area) {
+        return """
+            <html>
+              <body style="font-family: SansSerif; padding: 10px; color: #1f2937; background: #fbf7ef;">
+                <div style="display: grid; gap: 12px;">
+                  <div style="padding: 12px; border: 1px solid #d6cfc2; border-radius: 12px; background: #fffdf8;">
+                    <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">__TITLE__</div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                      <tr><td style="font-weight: 700; width: 120px; padding: 3px 0;">Severity</td><td>__SEVERITY__</td></tr>
+                      <tr><td style="font-weight: 700; padding: 3px 0;">Type</td><td>__TYPE__</td></tr>
+                      <tr><td style="font-weight: 700; padding: 3px 0;">Area</td><td>__AREA__</td></tr>
+                      <tr><td style="font-weight: 700; padding: 3px 0;">Host</td><td>__HOST__</td></tr>
+                      <tr><td style="font-weight: 700; padding: 3px 0;">URL</td><td>__URL__</td></tr>
+                      <tr><td style="font-weight: 700; padding: 3px 0;">First seen</td><td>__FIRST_SEEN__</td></tr>
+                      <tr><td style="font-weight: 700; padding: 3px 0;">False positive</td><td>__FALSE_POSITIVE__</td></tr>
+                    </table>
+                  </div>
+                  <div style="padding: 12px; border: 1px solid #d6cfc2; border-radius: 12px; background: #fffdf8;">
+                    <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px; color: #9a3412;">Summary</div>
+                    <div style="white-space: pre-wrap; line-height: 1.45;">__SUMMARY__</div>
+                  </div>
+                  <div style="padding: 12px; border: 1px solid #d6cfc2; border-radius: 12px; background: #fffdf8;">
+                    <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px; color: #9a3412;">Evidence</div>
+                    <pre style="margin: 0; white-space: pre-wrap; font-family: Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.4;">__EVIDENCE__</pre>
+                  </div>
+                  <div style="padding: 12px; border: 1px solid #d6cfc2; border-radius: 12px; background: #fffdf8;">
+                    <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px; color: #9a3412;">Recommendation</div>
+                    <div style="white-space: pre-wrap; line-height: 1.45;">__RECOMMENDATION__</div>
+                  </div>
+                </div>
+              </body>
+            </html>
+            """
+            .replace("__TITLE__", escapeHtml(finding.title()))
+            .replace("__SEVERITY__", escapeHtml(finding.severity() + " (" + finding.confidence() + ")"))
+            .replace("__TYPE__", escapeHtml(finding.type()))
+            .replace("__AREA__", escapeHtml(area))
+            .replace("__HOST__", escapeHtml(finding.host()))
+            .replace("__URL__", escapeHtml(finding.url()))
+            .replace("__FIRST_SEEN__", escapeHtml(finding.firstSeen()))
+            .replace("__FALSE_POSITIVE__", falsePositive ? "yes" : "no")
+            .replace("__SUMMARY__", escapeHtml(finding.summary()))
+            .replace("__EVIDENCE__", escapeHtml(finding.evidence()))
+            .replace("__RECOMMENDATION__", escapeHtml(finding.recommendation()));
+    }
+
+    private static String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;");
+    }
 }
