@@ -13,6 +13,18 @@ window.ClientSideEyeRuntime = (() => {
     );
   }
 
+  async function removeRuntimeHooks(tabId) {
+    await window.ClientSideEyeBridge.withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: restoreRuntimeHooks,
+      }),
+      EXEC_TIMEOUT_MS,
+      "Timed out removing runtime hooks from tab",
+    );
+  }
+
   function installRuntimeHooks() {
     const root = document.documentElement;
     if (!root) return { installed: false };
@@ -21,6 +33,7 @@ window.ClientSideEyeRuntime = (() => {
       installed: false,
       entries: [],
       seq: 0,
+      originals: {},
     };
     window.__clientsideeyeRuntime = state;
 
@@ -146,6 +159,7 @@ window.ClientSideEyeRuntime = (() => {
       try {
         const originalFetch = window.fetch;
         if (typeof originalFetch === "function") {
+          state.originals.fetch = originalFetch;
           window.fetch = function(input, init) {
             try {
               const request = input instanceof Request ? input : null;
@@ -164,6 +178,9 @@ window.ClientSideEyeRuntime = (() => {
         const originalOpen = XMLHttpRequest.prototype.open;
         const originalSend = XMLHttpRequest.prototype.send;
         const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+        state.originals.xhrOpen = originalOpen;
+        state.originals.xhrSend = originalSend;
+        state.originals.xhrSetRequestHeader = originalSetRequestHeader;
         XMLHttpRequest.prototype.open = function(method, url) {
           try {
             this.__clientsideeyeMethod = method;
@@ -195,6 +212,7 @@ window.ClientSideEyeRuntime = (() => {
       try {
         const OriginalWebSocket = window.WebSocket;
         if (typeof OriginalWebSocket === "function") {
+          state.originals.webSocket = OriginalWebSocket;
           window.WebSocket = function(url, protocols) {
             try {
               record("websocket", url, { initiator: "websocket" });
@@ -210,6 +228,7 @@ window.ClientSideEyeRuntime = (() => {
       try {
         const OriginalEventSource = window.EventSource;
         if (typeof OriginalEventSource === "function") {
+          state.originals.eventSource = OriginalEventSource;
           window.EventSource = function(url, config) {
             try {
               record("eventsource", url, { initiator: "eventsource" });
@@ -227,8 +246,41 @@ window.ClientSideEyeRuntime = (() => {
     return { installed: true, entries: state.entries.length };
   }
 
+  function restoreRuntimeHooks() {
+    const state = window.__clientsideeyeRuntime;
+    if (!state || !state.installed) {
+      return { restored: false };
+    }
+
+    try {
+      if (state.originals.fetch) {
+        window.fetch = state.originals.fetch;
+      }
+      if (state.originals.xhrOpen) {
+        XMLHttpRequest.prototype.open = state.originals.xhrOpen;
+      }
+      if (state.originals.xhrSend) {
+        XMLHttpRequest.prototype.send = state.originals.xhrSend;
+      }
+      if (state.originals.xhrSetRequestHeader) {
+        XMLHttpRequest.prototype.setRequestHeader = state.originals.xhrSetRequestHeader;
+      }
+      if (state.originals.webSocket) {
+        window.WebSocket = state.originals.webSocket;
+      }
+      if (state.originals.eventSource) {
+        window.EventSource = state.originals.eventSource;
+      }
+    } catch (error) {}
+
+    state.installed = false;
+    state.originals = {};
+    return { restored: true };
+  }
+
   return {
     EXEC_TIMEOUT_MS,
     ensureRuntimeHooks,
+    removeRuntimeHooks,
   };
 })();

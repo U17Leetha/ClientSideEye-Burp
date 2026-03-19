@@ -363,7 +363,6 @@ public class ClientSideEyeTab extends JPanel {
             .filter(finding -> filters.matches(finding, isFalsePositive(finding), findingArea(finding)))
             .collect(Collectors.toList());
         tableModel.setRows(filtered);
-        sorter.setSortKeys(defaultSortKeys());
     }
 
     private void toggleFalsePositiveForSelection() {
@@ -455,7 +454,7 @@ public class ClientSideEyeTab extends JPanel {
         Runnable prompt = () -> decision[0] = JOptionPane.showConfirmDialog(
                 api.userInterface().swingUtils().suiteFrame(),
                 "ClientSideEye found " + inScopeCount + " in-scope Site Map items.\n"
-                        + "To stay responsive, this run will analyze at most " + scanLimit + " HTML-like responses.\n"
+                        + "To stay responsive, this run will analyze at most " + scanLimit + " analyzable responses.\n"
                         + "Current host scope: " + currentScanHostScope() + "\n\n"
                         + "Continue?",
                 "Large Site Map Scan",

@@ -45,13 +45,13 @@ final class SiteMapScanRunner {
                 continue;
             }
 
+            analyzed++;
             List<Finding> findings = ResponseAnalyzer.analyze(url, body);
             if (findings.isEmpty()) {
                 skippedNonAnalyzable++;
                 continue;
             }
 
-            analyzed++;
             added += findings.size();
             findingsConsumer.accept(findings);
         }

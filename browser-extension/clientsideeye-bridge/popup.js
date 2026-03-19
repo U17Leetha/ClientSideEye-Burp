@@ -43,8 +43,9 @@ async function runScan(button, watchMode) {
     return;
   }
 
+  let tab;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) {
       status.textContent = "No active tab.";
       return;
@@ -134,6 +135,11 @@ async function runScan(button, watchMode) {
   } catch (error) {
     status.textContent = `Error: ${error?.message || error}`;
   } finally {
+    try {
+      if (tab?.id) {
+        await window.ClientSideEyeRuntime.removeRuntimeHooks(tab.id);
+      }
+    } catch (error) {}
     button.disabled = false;
   }
 }
