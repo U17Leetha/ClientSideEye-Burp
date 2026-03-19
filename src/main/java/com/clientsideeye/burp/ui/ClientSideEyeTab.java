@@ -7,16 +7,49 @@ import com.clientsideeye.burp.core.Finding;
 import com.clientsideeye.burp.core.FindingType;
 import com.clientsideeye.burp.core.JsonExporter;
 
-import javax.swing.*;
+import javax.swing.AbstractButton;
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JDialog;
+import javax.swing.JFileChooser;
+import javax.swing.JLabel;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
+import javax.swing.JSpinner;
+import javax.swing.JSplitPane;
+import javax.swing.JTable;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.JToggleButton;
+import javax.swing.ListSelectionModel;
 import javax.swing.RowSorter.SortKey;
+import javax.swing.SortOrder;
+import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import javax.swing.table.*;
-import java.awt.*;
+import javax.swing.table.TableRowSorter;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.io.File;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.*;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -48,19 +81,7 @@ public class ClientSideEyeTab extends JPanel {
     private final JSpinner scanLimitSpinner = new JSpinner(new SpinnerNumberModel(SITE_MAP_SCAN_HARD_CAP, 100, 10000, 100));
     private final JCheckBox exportVisibleOnly = new JCheckBox("Export visible rows only", true);
 
-    private final JCheckBoxMenuItem filterTypePassword = new JCheckBoxMenuItem(FindingType.PASSWORD_VALUE_IN_DOM.name(), true);
-    private final JCheckBoxMenuItem filterTypeHidden = new JCheckBoxMenuItem(FindingType.HIDDEN_OR_DISABLED_CONTROL.name(), true);
-    private final JCheckBoxMenuItem filterTypeRole = new JCheckBoxMenuItem(FindingType.ROLE_PERMISSION_HINT.name(), true);
-    private final JCheckBoxMenuItem filterTypeInline = new JCheckBoxMenuItem(FindingType.INLINE_SCRIPT_SECRETISH.name(), true);
-    private final JCheckBoxMenuItem filterTypeDevtools = new JCheckBoxMenuItem(FindingType.DEVTOOLS_BLOCKING.name(), true);
-    private final JCheckBoxMenuItem filterTypeEndpoint = new JCheckBoxMenuItem(FindingType.JAVASCRIPT_ENDPOINT_REFERENCE.name(), true);
-    private final JCheckBoxMenuItem filterTypeDomXss = new JCheckBoxMenuItem(FindingType.DOM_XSS_SINK.name(), true);
-    private final JCheckBoxMenuItem filterTypePostMessage = new JCheckBoxMenuItem(FindingType.POSTMESSAGE_HANDLER.name(), true);
-    private final JCheckBoxMenuItem filterTypeStorage = new JCheckBoxMenuItem(FindingType.STORAGE_TOKEN.name(), true);
-    private final JCheckBoxMenuItem filterTypeSourceMap = new JCheckBoxMenuItem(FindingType.SOURCE_MAP_DISCLOSURE.name(), true);
-    private final JCheckBoxMenuItem filterTypeRuntimeNetwork = new JCheckBoxMenuItem(FindingType.RUNTIME_NETWORK_REFERENCE.name(), true);
-    private final JPopupMenu typeMenu = new JPopupMenu();
-    private final JButton typeMenuButton = new JButton("Type…");
+    private final FindingTypeFilterMenu typeFilterMenu = new FindingTypeFilterMenu();
 
     private final JCheckBoxMenuItem filterHigh = new JCheckBoxMenuItem("High", true);
     private final JCheckBoxMenuItem filterMedium = new JCheckBoxMenuItem("Medium", true);
@@ -92,9 +113,6 @@ public class ClientSideEyeTab extends JPanel {
     }
 
     private void configureMenus() {
-        configurePopupMenu(typeMenu, typeMenuButton, filterTypePassword, filterTypeHidden, filterTypeRole,
-            filterTypeInline, filterTypeDevtools, filterTypeEndpoint, filterTypeDomXss, filterTypePostMessage,
-            filterTypeStorage, filterTypeSourceMap, filterTypeRuntimeNetwork);
         configurePopupMenu(severityMenu, severityMenuButton, filterHigh, filterMedium, filterLow, filterInfo);
     }
 
@@ -141,7 +159,7 @@ public class ClientSideEyeTab extends JPanel {
         addControl(controls, c, 2, 0, 0, 1, new JLabel("Search:"));
         addControl(controls, c, 3, 0, 1, 1, filterSearch);
         addControl(controls, c, 4, 0, 0, 1, new JLabel("Type:"));
-        addControl(controls, c, 5, 0, 0.5, 1, typeMenuButton);
+        addControl(controls, c, 5, 0, 0.5, 1, typeFilterMenu.button());
         addControl(controls, c, 6, 0, 0, 1, new JLabel("Severity:"));
         addControl(controls, c, 7, 0, 0, 1, severityMenuButton);
         addControl(controls, c, 8, 0, 0, 1, filterFalsePositive);
@@ -229,11 +247,9 @@ public class ClientSideEyeTab extends JPanel {
         analyzeSiteMapButton.addActionListener(e -> bg.submit(this::analyzeSiteMapInScope));
         copyTokenButton.addActionListener(e -> copyBridgeToken());
         registerRefreshActions(
-            filterHigh, filterMedium, filterLow, filterInfo, filterFalsePositive,
-            filterTypePassword, filterTypeHidden, filterTypeRole, filterTypeInline, filterTypeDevtools,
-            filterTypeEndpoint, filterTypeDomXss, filterTypePostMessage, filterTypeStorage,
-            filterTypeSourceMap, filterTypeRuntimeNetwork
+            filterHigh, filterMedium, filterLow, filterInfo, filterFalsePositive
         );
+        typeFilterMenu.addChangeListener(e -> refreshTable());
         DocumentListener refreshListener = new RefreshDocumentListener();
         filterHost.getDocument().addDocumentListener(refreshListener);
         filterSearch.getDocument().addDocumentListener(refreshListener);
@@ -260,7 +276,7 @@ public class ClientSideEyeTab extends JPanel {
             detailArea.setText("");
             return;
         }
-        detailArea.setText(renderFinding(finding));
+        detailArea.setText(FindingDetailRenderer.render(finding, isFalsePositive(finding), findingArea(finding)));
         detailArea.setCaretPosition(0);
     }
 
@@ -388,7 +404,7 @@ public class ClientSideEyeTab extends JPanel {
         }
 
         refreshTable();
-        detailArea.setText(renderFinding(f));
+        detailArea.setText(FindingDetailRenderer.render(f, isFalsePositive(f), findingArea(f)));
         detailArea.setCaretPosition(0);
     }
 
@@ -493,7 +509,7 @@ public class ClientSideEyeTab extends JPanel {
             filterLow.isSelected(),
             filterInfo.isSelected(),
             filterFalsePositive.isSelected(),
-            selectedTypes()
+            typeFilterMenu.selectedTypes()
         );
     }
 
@@ -517,42 +533,9 @@ public class ClientSideEyeTab extends JPanel {
         return FindingAreaResolver.resolve(finding);
     }
 
-    private String renderFinding(Finding f) {
-        return ""
-                + "Severity: " + f.severity() + " (" + f.confidence() + ")\n"
-                + "False positive: " + (isFalsePositive(f) ? "yes" : "no") + "\n"
-                + "Type: " + f.type() + "\n"
-                + "Area: " + findingArea(f) + "\n"
-                + "URL: " + f.url() + "\n"
-                + "Host: " + f.host() + "\n"
-                + "Title: " + f.title() + "\n"
-                + "First seen: " + f.firstSeen() + "\n"
-                + "\n"
-                + "Summary:\n" + f.summary() + "\n"
-                + "\n"
-                + "Evidence:\n" + f.evidence() + "\n"
-                + "\n"
-                + "Recommendation:\n" + f.recommendation() + "\n";
-    }
-
     private boolean isFalsePositive(Finding f) {
         return f != null && falsePositiveKeys.contains(f.stableKey());
     }
 
-    private Set<String> selectedTypes() {
-        Set<String> types = new HashSet<>();
-        if (filterTypePassword.isSelected()) types.add(FindingType.PASSWORD_VALUE_IN_DOM.name());
-        if (filterTypeHidden.isSelected()) types.add(FindingType.HIDDEN_OR_DISABLED_CONTROL.name());
-        if (filterTypeRole.isSelected()) types.add(FindingType.ROLE_PERMISSION_HINT.name());
-        if (filterTypeInline.isSelected()) types.add(FindingType.INLINE_SCRIPT_SECRETISH.name());
-        if (filterTypeDevtools.isSelected()) types.add(FindingType.DEVTOOLS_BLOCKING.name());
-        if (filterTypeEndpoint.isSelected()) types.add(FindingType.JAVASCRIPT_ENDPOINT_REFERENCE.name());
-        if (filterTypeDomXss.isSelected()) types.add(FindingType.DOM_XSS_SINK.name());
-        if (filterTypePostMessage.isSelected()) types.add(FindingType.POSTMESSAGE_HANDLER.name());
-        if (filterTypeStorage.isSelected()) types.add(FindingType.STORAGE_TOKEN.name());
-        if (filterTypeSourceMap.isSelected()) types.add(FindingType.SOURCE_MAP_DISCLOSURE.name());
-        if (filterTypeRuntimeNetwork.isSelected()) types.add(FindingType.RUNTIME_NETWORK_REFERENCE.name());
-        return types;
-    }
 
 }
