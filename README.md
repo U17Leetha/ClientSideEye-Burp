@@ -74,21 +74,16 @@ The popup now requires a per-session **Bridge Token** from the Burp extension ta
 
 ### Recommended
 
-
-1. Download the latest ```ClientSideEye-Burp.jar```
-2. In Burp Suite:
-
-- Extensions → Installed → Add
-
-- Extension type: Java
-
-- Select the generated JAR
+1. Download the latest `ClientSideEye-Burp.jar`
+2. In Burp Suite, open `Extensions -> Installed -> Add`
+3. Choose `Extension type: Java`
+4. Select the generated JAR
 
 ### Build from source
-1. Build the extension:
-   ```bash
-   gradle clean jar
-   ```
+
+```bash
+./gradlew clean jar
+```
 
 ## Usage
 
@@ -232,6 +227,25 @@ To reduce the risk of arbitrary web pages injecting spoofed findings into Burp:
 - CORS is only granted to browser extension origins
 - request bodies are size-limited
 - bridge sockets use read timeouts and worker handling to avoid a single stalled client blocking the bridge
+
+## Development
+
+Common local commands:
+
+```bash
+./gradlew test
+./gradlew check
+./gradlew clean jar
+```
+
+Project conventions:
+
+- Keep Burp UI classes focused on coordination; move filtering, rendering, and scan orchestration into helpers
+- Keep analyzers small and single-purpose; prefer coordinator classes over large heuristic buckets
+- Treat the browser helper as a separate runtime collector with minimal UI/controller logic in `popup.js`
+- Prefer comments that explain intent or tradeoffs, not line-by-line behavior
+
+When changing browser-extension behavior, run `./gradlew check` so the Java build and browser script verification stay aligned.
 
 ## SPA/Hash Route Guidance
 
