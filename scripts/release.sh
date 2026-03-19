@@ -9,11 +9,19 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-VERSION="$(sed -n "s/^version = '\''\([^'\'']*\)'\''$/\1/p" build.gradle | head -n 1)"
+VERSION="$({ python3 - <<'PY'
+from pathlib import Path
+import re
+text = Path('build.gradle').read_text()
+match = re.search(r"^version = '([^']+)'", text, re.MULTILINE)
+print(match.group(1) if match else "")
+PY
+} )"
 if [[ -z "$VERSION" ]]; then
   echo "Could not determine version from build.gradle" >&2
   exit 1
 fi
+
 TAG="v$VERSION"
 VERSIONED_JAR="build/libs/ClientSideEye-Burp-$VERSION.jar"
 ROOT_JAR="ClientSideEye-Burp.jar"
