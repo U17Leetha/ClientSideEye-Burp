@@ -175,7 +175,7 @@ final class ViewInBrowserDialog {
         if (item == null) {
             return "";
         }
-        int idx = item.indexOf(": ");
+        int idx = item.lastIndexOf(": ");
         return idx >= 0 && idx + 2 < item.length() ? item.substring(idx + 2) : item;
     }
 }
