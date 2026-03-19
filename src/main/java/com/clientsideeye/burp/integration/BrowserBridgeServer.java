@@ -2,7 +2,6 @@ package com.clientsideeye.burp.integration;
 
 import burp.api.montoya.MontoyaApi;
 import com.clientsideeye.burp.core.Finding;
-import com.clientsideeye.burp.core.FindingType;
 import com.clientsideeye.burp.ui.ClientSideEyeTab;
 
 import java.io.BufferedReader;
@@ -14,7 +13,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -224,43 +222,20 @@ public final class BrowserBridgeServer {
 
     private void handleFindingPost(BufferedWriter out, String body, String origin) throws IOException {
         Map<String, String> form = parseFormEncoded(body);
-        String url = safe(form.get("url"));
-        if (url.isBlank()) {
-            writeResponse(out, 400, "application/json; charset=utf-8", "{\"error\":\"url is required\"}", origin);
+        Finding finding;
+        try {
+            finding = BrowserBridgeFindingFactory.fromForm(form);
+        } catch (IllegalArgumentException e) {
+            writeResponse(out, 400, "application/json; charset=utf-8", "{\"error\":\"" + e.getMessage() + "\"}", origin);
             return;
         }
-
-        String type = normalizeType(form.get("type"));
-        Finding.Severity severity = parseSeverity(form.get("severity"));
-        int confidence = parseInt(form.get("confidence"), 55);
-        String title = defaultIfBlank(form.get("title"), "Browser-reported client-side control finding");
-        String summary = defaultIfBlank(form.get("summary"),
-                "A browser extension submitted a client-side control signal for review.");
-        String evidence = defaultIfBlank(form.get("evidence"), "(no evidence)");
-        String recommendation = defaultIfBlank(form.get("recommendation"),
-                "Validate server-side authorization for this action. Do not rely on client-side disabled/hidden states.");
-        String host = hostFromUrl(url);
-        String identity = defaultIfBlank(form.get("identity"), type + "|" + Integer.toHexString(evidence.hashCode()));
-
-        Finding finding = new Finding(
-                type,
-                severity,
-                confidence,
-                url,
-                host,
-                title,
-                summary,
-                evidence,
-                recommendation,
-                identity
-        );
 
         List<Finding> findings = new ArrayList<>();
         findings.add(finding);
         tab.addFindings(findings);
 
-        String source = defaultIfBlank(form.get("source"), "browser-extension");
-        api.logging().logToOutput("[ClientSideEye] Bridge accepted finding from " + source + " | " + type + " | " + severity + " (" + confidence + ") | " + url);
+        String source = BrowserBridgeFindingFactory.defaultIfBlank(form.get("source"), "browser-extension");
+        api.logging().logToOutput("[ClientSideEye] Bridge accepted finding from " + source + " | " + finding.type() + " | " + finding.severity() + " (" + finding.confidence() + ") | " + finding.url());
         writeResponse(out, 200, "application/json; charset=utf-8", "{\"accepted\":1}", origin);
     }
 
@@ -306,6 +281,10 @@ public final class BrowserBridgeServer {
         return 200;
     }
 
+    static Map<String, String> parseFormEncodedForTest(String body) {
+        return parseFormEncoded(body);
+    }
+
     private static Map<String, String> parseFormEncoded(String body) {
         Map<String, String> out = new HashMap<>();
         if (body == null || body.isBlank()) return out;
@@ -322,48 +301,8 @@ public final class BrowserBridgeServer {
         return out;
     }
 
-    private static String normalizeType(String type) {
-        String t = safe(type).trim();
-        if (t.isBlank()) return FindingType.HIDDEN_OR_DISABLED_CONTROL.name();
-        for (FindingType ft : FindingType.values()) {
-            if (ft.name().equalsIgnoreCase(t)) return ft.name();
-        }
-        return FindingType.HIDDEN_OR_DISABLED_CONTROL.name();
-    }
-
-    private static Finding.Severity parseSeverity(String s) {
-        String x = safe(s).trim().toUpperCase(Locale.ROOT);
-        try {
-            return Finding.Severity.valueOf(x);
-        } catch (Exception e) {
-            return Finding.Severity.MEDIUM;
-        }
-    }
-
-    private static int parseInt(String s, int dflt) {
-        try {
-            return Integer.parseInt(safe(s).trim());
-        } catch (Exception e) {
-            return dflt;
-        }
-    }
-
-    private static String defaultIfBlank(String s, String dflt) {
-        String x = safe(s).trim();
-        return x.isBlank() ? dflt : x;
-    }
-
     private static String safe(String s) {
         return s == null ? "" : s;
-    }
-
-    private static String hostFromUrl(String url) {
-        try {
-            URI u = URI.create(url);
-            return u.getHost() == null ? "" : u.getHost();
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private static String generateToken() {

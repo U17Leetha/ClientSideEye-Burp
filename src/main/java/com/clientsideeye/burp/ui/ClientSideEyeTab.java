@@ -5,10 +5,7 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 
 import com.clientsideeye.burp.core.Finding;
 import com.clientsideeye.burp.core.FindingType;
-import com.clientsideeye.burp.core.HtmlAnalyzer;
-import com.clientsideeye.burp.core.JavaScriptAnalyzer;
 import com.clientsideeye.burp.core.JsonExporter;
-import com.clientsideeye.burp.core.SourceMapAnalyzer;
 
 import javax.swing.*;
 import javax.swing.RowSorter.SortKey;
@@ -288,11 +285,7 @@ public class ClientSideEyeTab extends JPanel {
     private void analyzeSiteMapInScope() {
         try {
             List<HttpRequestResponse> items = api.siteMap().requestResponses();
-            long inScopeCount = items.stream()
-                    .filter(Objects::nonNull)
-                    .filter(rr -> rr.request() != null && rr.request().isInScope())
-                    .filter(rr -> scanHostMatches(rr.request().url()))
-                    .count();
+            long inScopeCount = SiteMapScanRunner.countEligible(items, this::scanHostMatches);
 
             if (inScopeCount == 0) {
                 api.logging().logToOutput("[ClientSideEye] Site Map analyze skipped. No in-scope items.");
@@ -307,37 +300,10 @@ public class ClientSideEyeTab extends JPanel {
                 }
             }
 
-            int analyzed = 0;
-            int added = 0;
-            int skippedNonAnalyzable = 0;
-            int skippedByCap = 0;
             int scanLimit = ((Number) scanLimitSpinner.getValue()).intValue();
+            SiteMapScanSummary summary = SiteMapScanRunner.scan(items, this::scanHostMatches, scanLimit, this::addFindings);
 
-            for (HttpRequestResponse rr : items) {
-                if (rr == null || rr.request() == null || rr.response() == null) continue;
-                if (!rr.request().isInScope()) continue;
-                if (!scanHostMatches(rr.request().url())) continue;
-                if (analyzed >= scanLimit) {
-                    skippedByCap++;
-                    continue;
-                }
-
-                String body = rr.response().bodyToString();
-                if (body == null || body.isBlank()) continue;
-
-                List<Finding> f = analyzeResponse(rr.request().url(), body);
-                if (f.isEmpty()) {
-                    skippedNonAnalyzable++;
-                    continue;
-                }
-                analyzed++;
-                if (!f.isEmpty()) {
-                    added += f.size();
-                    addFindings(f);
-                }
-            }
-
-            api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + analyzed + " | Findings added: " + added + " | Skipped (non-analyzable): " + skippedNonAnalyzable + " | Skipped (scan cap): " + skippedByCap + " | Host scope: " + currentScanHostScope());
+            api.logging().logToOutput("[ClientSideEye] Site Map analyze complete. Pages analyzed: " + summary.analyzed() + " | Findings added: " + summary.added() + " | Skipped (non-analyzable): " + summary.skippedNonAnalyzable() + " | Skipped (scan cap): " + summary.skippedByCap() + " | Host scope: " + currentScanHostScope());
         } catch (Exception e) {
             api.logging().logToError("[ClientSideEye] Site Map analyze error: " + e);
         }
@@ -367,28 +333,6 @@ public class ClientSideEyeTab extends JPanel {
             return null;
         }
         return tableModel.getAt(table.convertRowIndexToModel(viewRow));
-    }
-
-    private List<Finding> analyzeResponse(String url, String body) {
-        boolean htmlLike = HtmlAnalyzer.looksLikeHtmlForAnalysis(url, body);
-        boolean jsLike = JavaScriptAnalyzer.looksLikeJavaScriptForAnalysis(url, body);
-        boolean sourceMapLike = SourceMapAnalyzer.looksLikeSourceMap(url, body);
-        if (!htmlLike && !jsLike && !sourceMapLike) {
-            return List.of();
-        }
-
-        List<Finding> findings = new ArrayList<>();
-        if (htmlLike) {
-            findings.addAll(HtmlAnalyzer.analyzeHtml(url, body));
-        }
-        if (jsLike) {
-            findings.addAll(JavaScriptAnalyzer.analyzeJavaScript(url, body));
-            findings.addAll(SourceMapAnalyzer.analyzeSourceMappingReference(url, body));
-        }
-        if (sourceMapLike) {
-            findings.addAll(SourceMapAnalyzer.analyzeSourceMap(url, body));
-        }
-        return findings;
     }
 
     private final class RefreshDocumentListener implements DocumentListener {
