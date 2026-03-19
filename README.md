@@ -28,6 +28,8 @@ This release turns ClientSideEye from a narrow HTML helper into a broader client
 
 ClientSideEye is positioned as a focused client-side enumeration extension for Burp Suite. The goal is not to claim full browser-security coverage, but to give testers a practical workflow for surfacing client-side authorization anti-patterns, risky DOM/runtime behaviors, exposed routes/endpoints, and runtime-only clues that are easy to miss from proxy traffic alone.
 
+BApp submission drafting notes are kept in [`BAPP_SUBMISSION.md`](BAPP_SUBMISSION.md).
+
 ## Quick Start (60 seconds)
 
 1. Build and load extension JAR in Burp:
