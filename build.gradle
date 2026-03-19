@@ -72,3 +72,14 @@ jar {
         )
     }
 }
+
+tasks.register('syncRootJar', Copy) {
+    dependsOn(tasks.named('jar'))
+    from(tasks.named('jar').flatMap { it.archiveFile })
+    into(layout.projectDirectory)
+    rename { 'ClientSideEye-Burp.jar' }
+}
+
+tasks.named('jar') {
+    finalizedBy(tasks.named('syncRootJar'))
+}

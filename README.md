@@ -88,16 +88,19 @@ The popup now requires a per-session **Bridge Token** from the Burp extension ta
 
 ### Recommended
 
-1. Download the latest `ClientSideEye-Burp.jar`
-2. In Burp Suite, open `Extensions -> Installed -> Add`
-3. Choose `Extension type: Java`
-4. Select the generated JAR
+1. Clone or download the repository
+2. Use the top-level `ClientSideEye-Burp.jar` artifact, or rebuild it with `./gradlew clean jar`
+3. In Burp Suite, open `Extensions -> Installed -> Add`
+4. Choose `Extension type: Java`
+5. Select `ClientSideEye-Burp.jar`
 
 ### Build from source
 
 ```bash
 ./gradlew clean jar
 ```
+
+The build also refreshes the top-level `ClientSideEye-Burp.jar` file for easy loading into Burp.
 
 ## Usage
 
