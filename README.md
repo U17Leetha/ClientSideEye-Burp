@@ -1,7 +1,6 @@
 # ClientSideEye (Burp Extension)
 
-ClientSideEye is a Burp Suite extension for identifying **client-side security anti-patterns**
-such as hidden/disabled privileged controls and passwords rendered in HTML responses.
+ClientSideEye is a Burp Suite extension for enumerating client-side security issues in modern web applications. It combines Burp-side static analysis with optional browser-assisted runtime collection to surface risky UI gating, exposed client-side logic, browser-reachable endpoints, and runtime-only signals that do not appear in raw HTTP responses.
 
 ## Architecture
 
@@ -15,10 +14,24 @@ The codebase is intentionally split into a few focused layers:
 
 Operationally, `Quick` paths favor lightweight static and current-DOM analysis, while `Deep` paths add temporary runtime instrumentation for SPA behavior and live network activity.
 
+## Release 0.2.0
+
+This release turns ClientSideEye from a narrow HTML helper into a broader client-side enumeration workflow:
+
+- Burp-side analysis now covers HTML, JavaScript assets, and exposed source maps
+- Browser-assisted scanning now supports quick and deep runtime collection
+- Findings include runtime storage, script, and network signals alongside static evidence
+- The localhost bridge is token-protected and better aligned with BApp security expectations
+- The codebase is split more cleanly across analyzers, UI helpers, and bridge components
+
+## Submission Summary
+
+ClientSideEye is positioned as a focused client-side enumeration extension for Burp Suite. The goal is not to claim full browser-security coverage, but to give testers a practical workflow for surfacing client-side authorization anti-patterns, risky DOM/runtime behaviors, exposed routes/endpoints, and runtime-only clues that are easy to miss from proxy traffic alone.
+
 ## Quick Start (60 seconds)
 
 1. Build and load extension JAR in Burp:
-   - `gradle clean jar`
+   - `./gradlew clean jar`
    - Burp `Extensions -> Installed -> Add` (Java), select built JAR
 2. Confirm Burp output shows:
    - `[ClientSideEye] Browser bridge listening on http://127.0.0.1:<port> ...`
@@ -43,7 +56,8 @@ ClientSideEye includes a companion Chromium browser extension in:
 
 Load it as an unpacked extension, then click:
 
-- `Quick Scan + Send or Deep Scan (15s Runtime) + Send`
+- `Quick Scan + Send`
+- `Deep Scan (15s Runtime) + Send`
 
 The popup should show:
 
@@ -127,14 +141,17 @@ Notes:
 
 ## Finding Types
 
-- PASSWORD_VALUE_IN_DOM
-
-- HIDDEN_OR_DISABLED_CONTROL
-
-- ROLE_PERMISSION_HINT
-
-- INLINE_SCRIPT_SECRETISH
-- DEVTOOLS_BLOCKING
+- `PASSWORD_VALUE_IN_DOM`
+- `HIDDEN_OR_DISABLED_CONTROL`
+- `ROLE_PERMISSION_HINT`
+- `INLINE_SCRIPT_SECRETISH`
+- `DEVTOOLS_BLOCKING`
+- `JAVASCRIPT_ENDPOINT_REFERENCE`
+- `DOM_XSS_SINK`
+- `POSTMESSAGE_HANDLER`
+- `STORAGE_TOKEN`
+- `SOURCE_MAP_DISCLOSURE`
+- `RUNTIME_NETWORK_REFERENCE`
 
 ## Browser Bridge (for Runtime DOM Findings)
 
