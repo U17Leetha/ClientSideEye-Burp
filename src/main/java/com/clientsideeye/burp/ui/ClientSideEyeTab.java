@@ -43,7 +43,8 @@ public class ClientSideEyeTab extends JPanel {
     private final JTextField filterHost = new JTextField();
     private final JTextField filterSearch = new JTextField();
     private final JTextField bridgeEndpointField = new JTextField("Bridge not started");
-    private final JTextField bridgeTokenField = new JTextField();
+    private final JPasswordField bridgeTokenField = new JPasswordField();
+    private final JToggleButton showTokenButton = new JToggleButton("Show");
     private final JSpinner scanLimitSpinner = new JSpinner(new SpinnerNumberModel(SITE_MAP_SCAN_HARD_CAP, 100, 10000, 100));
     private final JCheckBox exportVisibleOnly = new JCheckBox("Export visible rows only", true);
 
@@ -153,11 +154,18 @@ public class ClientSideEyeTab extends JPanel {
     private void addControlRowTwo(JPanel controls, GridBagConstraints c, JButton copyTokenButton) {
         bridgeEndpointField.setEditable(false);
         bridgeTokenField.setEditable(false);
+        char defaultEchoChar = bridgeTokenField.getEchoChar();
+        showTokenButton.addActionListener(e -> {
+            boolean show = showTokenButton.isSelected();
+            bridgeTokenField.setEchoChar(show ? (char) 0 : defaultEchoChar);
+            showTokenButton.setText(show ? "Hide" : "Show");
+        });
 
         addControl(controls, c, 0, 1, 0, 1, new JLabel("Bridge:"));
         addControl(controls, c, 1, 1, 1, 4, bridgeEndpointField);
         addControl(controls, c, 5, 1, 0, 1, new JLabel("Token:"));
-        addControl(controls, c, 6, 1, 1, 4, bridgeTokenField);
+        addControl(controls, c, 6, 1, 1, 3, bridgeTokenField);
+        addControl(controls, c, 9, 1, 0, 1, showTokenButton);
         addControl(controls, c, 10, 1, 0, 1, copyTokenButton);
         addControl(controls, c, 11, 1, 0, 1, new JLabel("Scan limit:"));
         addControl(controls, c, 12, 1, 0, 1, scanLimitSpinner);
@@ -322,7 +330,7 @@ public class ClientSideEyeTab extends JPanel {
     }
 
     private void copyBridgeToken() {
-        copyToClipboard(bridgeTokenField.getText());
+        copyToClipboard(new String(bridgeTokenField.getPassword()));
         api.logging().logToOutput("[ClientSideEye] Copied browser bridge token to clipboard.");
     }
 
