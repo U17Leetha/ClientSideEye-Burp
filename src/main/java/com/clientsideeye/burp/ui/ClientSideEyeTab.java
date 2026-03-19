@@ -13,7 +13,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.*;
 import java.awt.*;
-import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
@@ -436,7 +435,7 @@ public class ClientSideEyeTab extends JPanel {
     // --- helpers ---
 
     private static void copyToClipboard(String s) {
-        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(s == null ? "" : s), null);
+        ClipboardHelper.copy(s);
     }
 
     private static int severityRank(String s) {
